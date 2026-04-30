@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "205907486053",
-    "project_id": "mechassist-ed9dc",
-    "storage_bucket": "mechassist-ed9dc.firebasestorage.app"
+    "project_number": "YOUR_SENDER_ID",
+    "project_id": "your-firebase-project-id",
+    "storage_bucket": "your-firebase-project-id.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:205907486053:android:fd3d0650c094cbb5ba6d8c",
+        "mobilesdk_app_id": "1:YOUR_SENDER_ID:android:YOUR_APP_ID",
         "android_client_info": {
           "package_name": "com.example.mechassist"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyA4A3cB6fDKTGI-poqZ6YU8bE8zLXgZdDs"
+          "current_key": "YOUR_ANDROID_API_KEY"
         }
       ],
       "services": {

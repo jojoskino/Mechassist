@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Firebase Android config (download from Firebase Console → Project settings)
+app/google-services.json
