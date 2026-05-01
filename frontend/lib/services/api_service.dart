@@ -15,6 +15,23 @@ class ApiService {
     return 'http://127.0.0.1:8000/api';
   }
 
+  /// Identifiant entier robuste (JSON `num` / `String`).
+  static int? parseIntId(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
+  static dynamic _tryJsonDecode(String body) {
+    if (body.isEmpty) return null;
+    try {
+      return jsonDecode(body);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Map<String, dynamic> _parseBody(http.Response response) {
     final raw = response.body;
     if (raw.isEmpty) {
@@ -165,7 +182,15 @@ class ApiService {
         'radius_km': '$radiusKm',
       });
       final response = await http.get(uri, headers: _authHeaders(token, json: false));
-      return {'status': response.statusCode, 'data': jsonDecode(response.body)};
+      final decoded = _tryJsonDecode(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'status': response.statusCode, 'data': decoded};
+      }
+      final msg = decoded is Map ? decoded['message']?.toString() : null;
+      return {
+        'status': response.statusCode,
+        'message': msg ?? 'Impossible de charger les mécaniciens (${response.statusCode}).',
+      };
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -203,7 +228,15 @@ class ApiService {
         Uri.parse('$_apiRoot/requests'),
         headers: _authHeaders(token, json: false),
       );
-      return {'status': response.statusCode, 'data': jsonDecode(response.body)};
+      final decoded = _tryJsonDecode(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'status': response.statusCode, 'data': decoded};
+      }
+      final msg = decoded is Map ? decoded['message']?.toString() : null;
+      return {
+        'status': response.statusCode,
+        'message': msg ?? 'Impossible de charger les demandes (${response.statusCode}).',
+      };
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -255,7 +288,15 @@ class ApiService {
         Uri.parse('$_apiRoot/requests/$requestId/messages'),
         headers: _authHeaders(token, json: false),
       );
-      return {'status': response.statusCode, 'data': jsonDecode(response.body)};
+      final decoded = _tryJsonDecode(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'status': response.statusCode, 'data': decoded};
+      }
+      final msg = decoded is Map ? decoded['message']?.toString() : null;
+      return {
+        'status': response.statusCode,
+        'message': msg ?? 'Impossible de charger les messages (${response.statusCode}).',
+      };
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }

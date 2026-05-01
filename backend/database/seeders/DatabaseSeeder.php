@@ -18,6 +18,10 @@ class DatabaseSeeder extends Seeder
     {
         $password = Hash::make('MechAssist2026!');
 
+        // Coordonnées de démo (Lomé, Togo) — le client et le mécanicien sont proches pour tester la recherche.
+        $demoLat = 6.137;
+        $demoLng = 1.2194;
+
         User::query()->updateOrCreate(
             ['email' => 'client@mechassist.local'],
             [
@@ -26,6 +30,9 @@ class DatabaseSeeder extends Seeder
                 'password' => $password,
                 'role' => 'client',
                 'is_available' => false,
+                'latitude' => $demoLat - 0.002,
+                'longitude' => $demoLng - 0.002,
+                'last_location_at' => now(),
             ]
         );
 
@@ -37,6 +44,9 @@ class DatabaseSeeder extends Seeder
                 'password' => $password,
                 'role' => 'mecanicien',
                 'is_available' => true,
+                'latitude' => $demoLat,
+                'longitude' => $demoLng,
+                'last_location_at' => now(),
             ]
         );
     }

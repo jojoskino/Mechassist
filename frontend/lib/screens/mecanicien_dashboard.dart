@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/push_service.dart';
+import '../widgets/intervention_chat_dialog.dart';
 
 class DashboardMecanicien extends StatefulWidget {
   const DashboardMecanicien({super.key});
@@ -24,6 +26,16 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     super.initState();
     _refresh();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh(silent: true));
+    _syncPush();
+  }
+
+  Future<void> _syncPush() async {
+    final token = await AuthStorage.getToken();
+    if (token == null) return;
+    final fcm = await PushService.initAndGetToken();
+    if (fcm != null && fcm.isNotEmpty) {
+      await ApiService.updatePushToken(token, fcm);
+    }
   }
 
   @override
@@ -46,34 +58,65 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
       return;
     }
 
-    final me = await ApiService.getMe(token);
-    final reqs = await ApiService.listRequests(token);
+    String? errorMsg;
+    try {
+      final me = await ApiService.getMe(token);
+      final ms = me['status'] as int?;
+      if (ms != null && ms >= 200 && ms < 300) {
+        final rawAvail = me['is_available'];
+        available = rawAvail is bool
+            ? rawAvail
+            : rawAvail == 1 || rawAvail == true || rawAvail?.toString() == '1';
+        currentName = me['name']?.toString() ?? 'Mecanicien';
+        currentRole = me['role']?.toString() ?? 'mecanicien';
+      } else {
+        errorMsg = me['message']?.toString() ?? 'Session invalide ou API injoignable (${me['status']}).';
+      }
 
-    available = (me['is_available'] as bool?) ?? false;
-    currentName = me['name']?.toString() ?? 'Mecanicien';
-    currentRole = me['role']?.toString() ?? 'mecanicien';
-    requests = (reqs['data'] is List) ? (reqs['data'] as List) : [];
+      final reqs = await ApiService.listRequests(token);
+      final rs = reqs['status'] as int?;
+      if (rs != null && rs >= 200 && rs < 300 && reqs['data'] is List) {
+        requests = reqs['data'] as List;
+      } else {
+        requests = [];
+        errorMsg ??= reqs['message']?.toString() ?? 'Impossible de charger les demandes (${reqs['status']}).';
+      }
+    } catch (_) {
+      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion et que l’API tourne (port 8000).';
+    }
+
     if (!mounted) return;
     setState(() {
       loading = false;
-      lastError = null;
+      lastError = errorMsg;
     });
   }
 
   Future<void> _setAvailability(bool value) async {
     final token = await AuthStorage.getToken();
     if (token == null) return;
-    await ApiService.updateMechanicAvailability(token, value);
-    setState(() => available = value);
+    final res = await ApiService.updateMechanicAvailability(token, value);
+    if (!mounted) return;
+    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    if (ok) {
+      setState(() => available = value);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message']?.toString() ?? 'Erreur disponibilité')),
+      );
+    }
   }
 
   Future<void> _processRequest(int id, bool accept) async {
     final token = await AuthStorage.getToken();
     if (token == null) return;
-    if (accept) {
-      await ApiService.acceptRequest(token, id);
-    } else {
-      await ApiService.declineRequest(token, id);
+    final res = accept ? await ApiService.acceptRequest(token, id) : await ApiService.declineRequest(token, id);
+    if (!mounted) return;
+    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message']?.toString() ?? 'Action impossible')),
+      );
     }
     await _refresh(silent: true);
   }
@@ -81,76 +124,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   Future<void> _openChat(int requestId) async {
     if (!mounted) return;
     final token = await AuthStorage.getToken();
-    if (token == null) {
-      return;
-    }
-    await _openLegacyChat(requestId, token);
-  }
-
-  Future<void> _openLegacyChat(int requestId, String token) async {
-    final msgCtrl = TextEditingController();
-    List<dynamic> messages = [];
-    Timer? pollTimer;
-
-    Future<void> loadMessages(StateSetter setInner) async {
-      final res = await ApiService.listMessages(token, requestId);
-      messages = (res['data'] as List?) ?? [];
-      setInner(() {});
-    }
-
-    await showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setInner) {
-          if (messages.isEmpty) {
-            loadMessages(setInner);
-            pollTimer ??= Timer.periodic(
-              const Duration(seconds: 3),
-              (_) => loadMessages(setInner),
-            );
-          }
-          return AlertDialog(
-            title: const Text('Chat'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: messages.length,
-                      itemBuilder: (_, i) {
-                        final m = messages[i] as Map<String, dynamic>;
-                        final user = (m['user'] as Map?) ?? {};
-                        return ListTile(
-                          dense: true,
-                          title: Text(user['name']?.toString() ?? 'Utilisateur'),
-                          subtitle: Text(m['body']?.toString() ?? ''),
-                        );
-                      },
-                    ),
-                  ),
-                  TextField(controller: msgCtrl, decoration: const InputDecoration(hintText: 'Message')),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => loadMessages(setInner), child: const Text('Rafraichir')),
-              ElevatedButton(
-                onPressed: () async {
-                  await ApiService.sendMessage(token, requestId, msgCtrl.text.trim());
-                  msgCtrl.clear();
-                  await loadMessages(setInner);
-                },
-                child: const Text('Envoyer'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    pollTimer?.cancel();
+    if (!mounted || token == null) return;
+    await showInterventionChatDialog(context: context, authToken: token, requestId: requestId);
   }
 
   @override
@@ -213,6 +188,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
                   ...requests.map((r) {
                     final status = r['status']?.toString() ?? '';
                     final canAct = status == 'pending';
+                    final id = ApiService.parseIntId(r['id']);
                     return Card(
                       child: ListTile(
                         title: Text('${r['vehicle_type']} • $status'),
@@ -220,20 +196,21 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
                         trailing: Wrap(
                           spacing: 8,
                           children: [
-                            if (canAct)
+                            if (canAct && id != null)
                               IconButton(
-                                onPressed: () => _processRequest(r['id'] as int, true),
+                                onPressed: () => _processRequest(id, true),
                                 icon: const Icon(Icons.check_circle, color: Colors.green),
                               ),
-                            if (canAct)
+                            if (canAct && id != null)
                               IconButton(
-                                onPressed: () => _processRequest(r['id'] as int, false),
+                                onPressed: () => _processRequest(id, false),
                                 icon: const Icon(Icons.cancel, color: Colors.red),
                               ),
-                            TextButton(
-                              onPressed: () => _openChat(r['id'] as int),
-                              child: const Text('Chat'),
-                            ),
+                            if (status == 'accepted' && id != null)
+                              TextButton(
+                                onPressed: () => _openChat(id),
+                                child: const Text('Chat'),
+                              ),
                           ],
                         ),
                       ),

@@ -15,7 +15,7 @@ class AuthController extends Controller
             'phone'    => 'required|string|max:20',
             'password' => 'required|string|min:6|confirmed',
             'role'     => 'required|in:client,mecanicien',
-            'fcm_token' => 'nullable|string|max:512',
+            'fcm_token' => 'nullable|string|max:4096',
         ]);
 
         $user = User::create([
@@ -37,7 +37,7 @@ class AuthController extends Controller
         $request->validate([
             'email'    => 'required|email',
             'password' => 'required',
-            'fcm_token' => 'nullable|string|max:512',
+            'fcm_token' => 'nullable|string|max:4096',
         ]);
 
         $user = User::where('email', $request->email)->first();

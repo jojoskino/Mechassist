@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+
+import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/push_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -21,6 +24,21 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!mounted) return;
 
     if (isLogged) {
+      final token = await AuthStorage.getToken();
+      if (token != null) {
+        final me = await ApiService.getMe(token);
+        final ok = (me['status'] as int?) != null && (me['status'] as int) >= 200 && (me['status'] as int) < 300;
+        if (!ok) {
+          await AuthStorage.clear();
+          if (!mounted) return;
+          Navigator.pushReplacementNamed(context, '/welcome');
+          return;
+        }
+        final fcm = await PushService.initAndGetToken();
+        if (fcm != null && fcm.isNotEmpty) {
+          await ApiService.updatePushToken(token, fcm);
+        }
+      }
       final role = await AuthStorage.getRole();
       if (!mounted) return;
       Navigator.pushReplacementNamed(

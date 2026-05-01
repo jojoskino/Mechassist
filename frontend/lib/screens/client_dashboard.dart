@@ -6,6 +6,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/push_service.dart';
+import '../widgets/intervention_chat_dialog.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key});
@@ -33,6 +35,16 @@ class _DashboardClientState extends State<DashboardClient> {
     super.initState();
     _refreshAll();
     _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) => _refreshAll(silent: true));
+    _syncPush();
+  }
+
+  Future<void> _syncPush() async {
+    final token = await AuthStorage.getToken();
+    if (token == null) return;
+    final fcm = await PushService.initAndGetToken();
+    if (fcm != null && fcm.isNotEmpty) {
+      await ApiService.updatePushToken(token, fcm);
+    }
   }
 
   @override
@@ -57,32 +69,52 @@ class _DashboardClientState extends State<DashboardClient> {
     currentName = (await AuthStorage.getName()) ?? 'Client';
     currentRole = (await AuthStorage.getRole()) ?? 'client';
 
+    String? errorMsg;
     try {
       final position = await _getPosition();
       if (position != null) {
         lat = position.latitude;
         lng = position.longitude;
-        await ApiService.updateLocation(token, lat!, lng!);
+        final loc = await ApiService.updateLocation(token, lat!, lng!);
+        if ((loc['status'] as int?) != null && (loc['status'] as int) >= 400) {
+          errorMsg = loc['message']?.toString() ?? 'Erreur mise à jour position.';
+        }
         final nearby = await ApiService.nearbyMechanics(token, lat!, lng!);
-        mechanics = (nearby['data'] is List) ? (nearby['data'] as List) : [];
+        final ns = nearby['status'] as int?;
+        if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
+          mechanics = nearby['data'] as List;
+        } else {
+          mechanics = [];
+          errorMsg ??=
+              nearby['message']?.toString() ?? 'Impossible de charger les mécaniciens (code ${nearby['status']}).';
+        }
       } else {
         mechanics = [];
+        if (kIsWeb) {
+          errorMsg ??=
+              'Géolocalisation indisponible sur le navigateur. Lance l’app sur Android ou un émulateur pour tester la carte.';
+        } else {
+          errorMsg ??=
+              'Position GPS indisponible (services désactivés ou permission refusée). Active la localisation puis rafraîchis.';
+        }
       }
 
       final reqRes = await ApiService.listRequests(token);
-      requests = (reqRes['data'] is List) ? (reqRes['data'] as List) : [];
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          lastError = 'Impossible de charger les donnees. Verifie ta connexion.';
-        });
+      final rs = reqRes['status'] as int?;
+      if (rs != null && rs >= 200 && rs < 300 && reqRes['data'] is List) {
+        requests = reqRes['data'] as List;
+      } else {
+        requests = [];
+        errorMsg ??= reqRes['message']?.toString() ?? 'Impossible de charger tes demandes (code ${reqRes['status']}).';
       }
+    } catch (_) {
+      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion et que l’API tourne (port 8000).';
     }
 
     if (!mounted) return;
     setState(() {
       loading = false;
-      lastError = null;
+      lastError = errorMsg;
     });
   }
 
@@ -144,11 +176,24 @@ class _DashboardClientState extends State<DashboardClient> {
     final token = await AuthStorage.getToken();
     if (token == null) return;
 
+    final mechanicId = ApiService.parseIntId(mechanic['id']);
+    if (mechanicId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mécanicien invalide.')));
+      return;
+    }
+    final desc = descCtrl.text.trim();
+    if (desc.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ajoute une description de la panne.')));
+      return;
+    }
+
     final res = await ApiService.createRequest(
       token: token,
-      mechanicId: mechanic['id'] as int,
+      mechanicId: mechanicId,
       vehicleType: vehicleType,
-      description: descCtrl.text.trim(),
+      description: desc,
       clientLat: lat!,
       clientLng: lng!,
     );
@@ -163,76 +208,8 @@ class _DashboardClientState extends State<DashboardClient> {
   Future<void> _openChat(int requestId) async {
     if (!mounted) return;
     final token = await AuthStorage.getToken();
-    if (token == null) {
-      return;
-    }
-    await _openLegacyChat(requestId, token);
-  }
-
-  Future<void> _openLegacyChat(int requestId, String token) async {
-    final msgCtrl = TextEditingController();
-    List<dynamic> messages = [];
-    Timer? pollTimer;
-
-    Future<void> loadMessages(StateSetter setInner) async {
-      final res = await ApiService.listMessages(token, requestId);
-      messages = (res['data'] as List?) ?? [];
-      setInner(() {});
-    }
-
-    await showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setInner) {
-          if (messages.isEmpty) {
-            loadMessages(setInner);
-            pollTimer ??= Timer.periodic(
-              const Duration(seconds: 3),
-              (_) => loadMessages(setInner),
-            );
-          }
-          return AlertDialog(
-            title: const Text('Chat'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: messages.length,
-                      itemBuilder: (_, i) {
-                        final m = messages[i] as Map<String, dynamic>;
-                        final user = (m['user'] as Map?) ?? {};
-                        return ListTile(
-                          dense: true,
-                          title: Text(user['name']?.toString() ?? 'Utilisateur'),
-                          subtitle: Text(m['body']?.toString() ?? ''),
-                        );
-                      },
-                    ),
-                  ),
-                  TextField(controller: msgCtrl, decoration: const InputDecoration(hintText: 'Message')),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => loadMessages(setInner), child: const Text('Rafraichir')),
-              ElevatedButton(
-                onPressed: () async {
-                  await ApiService.sendMessage(token, requestId, msgCtrl.text.trim());
-                  msgCtrl.clear();
-                  await loadMessages(setInner);
-                },
-                child: const Text('Envoyer'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    pollTimer?.cancel();
+    if (!mounted || token == null) return;
+    await showInterventionChatDialog(context: context, authToken: token, requestId: requestId);
   }
 
   @override
@@ -399,10 +376,22 @@ class _DashboardClientState extends State<DashboardClient> {
               child: ListTile(
                 title: Text('${r['vehicle_type']} • ${r['status']}'),
                 subtitle: Text(r['description']?.toString() ?? ''),
-                trailing: TextButton(
-                  onPressed: () => _openChat(r['id'] as int),
-                  child: const Text('Chat'),
-                ),
+                trailing: r['status']?.toString() == 'accepted'
+                    ? TextButton(
+                        onPressed: () {
+                          final id = ApiService.parseIntId(r['id']);
+                          if (id != null) _openChat(id);
+                        },
+                        child: const Text('Chat'),
+                      )
+                    : Text(
+                        switch (r['status']?.toString()) {
+                          'pending' => 'En attente',
+                          'declined' => 'Refusée',
+                          _ => 'Statut: ${r['status']}',
+                        },
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      ),
               ),
             )),
       ],
