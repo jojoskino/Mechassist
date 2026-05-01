@@ -13,6 +13,9 @@ class DatabaseSeeder extends Seeder
 
     /**
      * Comptes de démonstration MechAssist (mot de passe commun pour le dev local).
+     *
+     * Important : `migrate:fresh --seed` supprime toutes les données PostgreSQL locales.
+     * En production, n’utilise que `php artisan migrate` (sans fresh) pour conserver les données.
      */
     public function run(): void
     {

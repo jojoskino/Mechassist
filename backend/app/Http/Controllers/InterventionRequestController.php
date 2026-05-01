@@ -5,13 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\InterventionRequest;
 use App\Models\User;
 use App\Services\FcmService;
+use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class InterventionRequestController extends Controller
 {
-    public function __construct(private readonly FcmService $fcmService)
-    {
+    public function __construct(
+        private readonly FcmService $fcmService,
+        private readonly FirestoreSyncService $firestoreSync,
+    ) {
     }
 
     public function index(Request $request)
@@ -99,6 +102,8 @@ class InterventionRequestController extends Controller
             ['type' => 'request_created', 'request_id' => (string) $row->id]
         );
 
+        $this->firestoreSync->syncInterventionRequest($row);
+
         return response()->json($this->transform($row), 201);
     }
 
@@ -136,6 +141,8 @@ class InterventionRequestController extends Controller
             ['type' => 'request_accepted', 'request_id' => (string) $row->id]
         );
 
+        $this->firestoreSync->syncInterventionRequest($row->fresh());
+
         return response()->json($this->transform($row));
     }
 
@@ -164,6 +171,8 @@ class InterventionRequestController extends Controller
             'Le mecanicien a refuse cette demande.',
             ['type' => 'request_declined', 'request_id' => (string) $row->id]
         );
+
+        $this->firestoreSync->syncInterventionRequest($row->fresh());
 
         return response()->json($this->transform($row));
     }

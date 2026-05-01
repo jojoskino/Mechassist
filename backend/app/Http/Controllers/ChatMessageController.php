@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\ChatMessage;
 use App\Models\InterventionRequest;
 use App\Services\FcmService;
+use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
 
 class ChatMessageController extends Controller
 {
-    public function __construct(private readonly FcmService $fcmService)
-    {
+    public function __construct(
+        private readonly FcmService $fcmService,
+        private readonly FirestoreSyncService $firestoreSync,
+    ) {
     }
 
     public function index(Request $request, int $id)
@@ -57,6 +60,8 @@ class ChatMessageController extends Controller
             $senderName.': '.$validated['body'],
             ['type' => 'chat_message', 'request_id' => (string) $row->id]
         );
+
+        $this->firestoreSync->syncChatMessage($message, $request->user());
 
         return response()->json($message, 201);
     }
