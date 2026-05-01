@@ -82,14 +82,14 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
   Future<void> _send() async {
     final body = _msgCtrl.text.trim();
     if (body.isEmpty) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Écris un message.')),
       );
       return;
     }
     final res = await ApiService.sendMessage(widget.authToken, widget.requestId, body);
-    if (!context.mounted) return;
+    if (!mounted) return;
     final ok = (res['status'] as int?) == 201;
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(

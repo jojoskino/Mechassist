@@ -86,6 +86,7 @@ class ApiService {
     String email,
     String phone,
     String password,
+    String passwordConfirmation,
     String role,
     String? fcmToken,
   ) async {
@@ -101,7 +102,7 @@ class ApiService {
           'email': email,
           'phone': phone,
           'password': password,
-          'password_confirmation': password,
+          'password_confirmation': passwordConfirmation,
           'role': role,
           if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
         }),

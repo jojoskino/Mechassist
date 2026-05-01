@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/push_service.dart';
@@ -6,20 +7,24 @@ import '../widgets/auth_shell.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
+
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final nameCtrl     = TextEditingController();
-  final emailCtrl    = TextEditingController();
-  final phoneCtrl    = TextEditingController();
+  final nameCtrl = TextEditingController();
+  final emailCtrl = TextEditingController();
+  final phoneCtrl = TextEditingController();
   final passwordCtrl = TextEditingController();
+  final passwordConfirmCtrl = TextEditingController();
   String role = 'client';
   bool isLoading = false;
   bool obscure = true;
+  bool obscureConfirm = true;
 
   static const Color accent = Color(0xFF0F4C75);
+  static const Color linkOrange = Color(0xFFE67E22);
 
   @override
   void dispose() {
@@ -27,20 +32,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
     emailCtrl.dispose();
     phoneCtrl.dispose();
     passwordCtrl.dispose();
+    passwordConfirmCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _register() async {
-    if ([nameCtrl, emailCtrl, phoneCtrl, passwordCtrl]
-        .any((c) => c.text.isEmpty)) {
+    if ([nameCtrl, emailCtrl, phoneCtrl, passwordCtrl, passwordConfirmCtrl].any((c) => c.text.isEmpty)) {
       _showSnack('Remplis tous les champs', isError: true);
+      return;
+    }
+    if (passwordCtrl.text != passwordConfirmCtrl.text) {
+      _showSnack('Les mots de passe ne correspondent pas.', isError: true);
+      return;
+    }
+    if (passwordCtrl.text.length < 6) {
+      _showSnack('Le mot de passe doit contenir au moins 6 caractères.', isError: true);
       return;
     }
     setState(() => isLoading = true);
     final fcmToken = await PushService.initAndGetToken();
     final res = await ApiService.register(
-      nameCtrl.text.trim(), emailCtrl.text.trim(),
-      phoneCtrl.text.trim(), passwordCtrl.text, role, fcmToken,
+      nameCtrl.text.trim(),
+      emailCtrl.text.trim(),
+      phoneCtrl.text.trim(),
+      passwordCtrl.text,
+      passwordConfirmCtrl.text,
+      role,
+      fcmToken,
     );
     if (!mounted) return;
     setState(() => isLoading = false);
@@ -54,18 +72,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
       await ApiService.updatePushToken(res['token'].toString(), fcmToken);
       if (!mounted) return;
-      _showSnack('Compte créé avec succès ✓');
+      _showSnack('Compte créé avec succès');
       Navigator.pushReplacementNamed(
         context,
-        (user['role']?.toString() ?? role) == 'mecanicien'
-            ? '/mecanicien'
-            : '/client',
+        (user['role']?.toString() ?? role) == 'mecanicien' ? '/mecanicien' : '/client',
       );
     } else {
       final errors = res['errors'];
-      String msg = res['message'] ?? 'Erreur inconnue';
+      var msg = res['message']?.toString() ?? 'Erreur inconnue';
       if (errors is Map) {
-        msg = (errors.values.first as List).first.toString();
+        final first = errors.values.first;
+        if (first is List && first.isNotEmpty) {
+          msg = first.first.toString();
+        }
       }
       _showSnack(msg, isError: true);
     }
@@ -74,26 +93,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? accent : Colors.green,
+      backgroundColor: isError ? accent : Colors.green.shade700,
     ));
   }
 
   @override
   Widget build(BuildContext context) {
     return AuthShell(
-      title: 'Creer un compte',
+      title: 'Créer un compte',
+      subtitle: 'Rejoins MechAssist en quelques étapes.',
       showBack: true,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildField(nameCtrl, Icons.person_outline_rounded, hint: 'Nom'),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _buildField(
             emailCtrl,
             Icons.mail_outline_rounded,
             hint: 'Email',
             keyboardType: TextInputType.emailAddress,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _buildField(
             passwordCtrl,
             Icons.lock_outline_rounded,
@@ -104,67 +125,153 @@ class _RegisterScreenState extends State<RegisterScreen> {
               onPressed: () => setState(() => obscure = !obscure),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          _buildField(
+            passwordConfirmCtrl,
+            Icons.lock_outline_rounded,
+            hint: 'Confirmer le mot de passe',
+            obscure: obscureConfirm,
+            suffix: IconButton(
+              icon: Icon(obscureConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+              onPressed: () => setState(() => obscureConfirm = !obscureConfirm),
+            ),
+          ),
+          const SizedBox(height: 16),
           _buildField(
             phoneCtrl,
             Icons.phone_outlined,
-            hint: 'Telephone',
+            hint: 'Téléphone',
             keyboardType: TextInputType.phone,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             value: role,
             items: const [
               DropdownMenuItem(value: 'client', child: Text('Client')),
-              DropdownMenuItem(value: 'mecanicien', child: Text('Mecanicien')),
+              DropdownMenuItem(value: 'mecanicien', child: Text('Mécanicien')),
             ],
             onChanged: (val) => setState(() => role = val ?? 'client'),
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.badge_outlined),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(30)),
+            decoration: const InputDecoration(
+              labelText: 'Type de compte',
+              prefixIcon: Icon(Icons.badge_outlined, color: Colors.black45),
             ),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: isLoading ? null : _register,
               style: ElevatedButton.styleFrom(
                 backgroundColor: accent,
-                minimumSize: const Size.fromHeight(52),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                minimumSize: const Size.fromHeight(54),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
               ),
               child: isLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
                     )
-                  : const Text('Creer un compte'),
+                  : const Text('Créer le compte', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
           ),
+          const SizedBox(height: 20),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            children: [
+              Text(
+                'Vous avez déjà un compte ? ',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: linkOrange,
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => Navigator.pushNamed(context, '/login'),
+                child: const Text('Se connecter', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(child: Divider(color: Colors.grey.shade300)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text('ou', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+              ),
+              Expanded(child: Divider(color: Colors.grey.shade300)),
+            ],
+          ),
+          const SizedBox(height: 18),
+          OutlinedButton(
+            onPressed: isLoading
+                ? null
+                : () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Inscription Google : bientôt disponible.')),
+                    );
+                  },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF10324A),
+              minimumSize: const Size.fromHeight(52),
+              side: const BorderSide(color: accent, width: 1.2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: const Text(
+                    'G',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      color: Color(0xFF4285F4),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text('Se connecter avec Google', style: TextStyle(fontWeight: FontWeight.w500)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
         ],
       ),
     );
   }
 
-  Widget _buildField(TextEditingController ctrl, IconData icon,
-      {String hint = '', bool obscure = false,
-       TextInputType? keyboardType, Widget? suffix}) {
+  Widget _buildField(
+    TextEditingController ctrl,
+    IconData icon, {
+    String hint = '',
+    bool obscure = false,
+    TextInputType? keyboardType,
+    Widget? suffix,
+  }) {
     return TextField(
       controller: ctrl,
       obscureText: obscure,
       keyboardType: keyboardType,
       decoration: InputDecoration(
         hintText: hint,
-        prefixIcon: Icon(icon, color: Colors.black54, size: 20),
+        prefixIcon: Icon(icon, color: Colors.black45, size: 22),
         suffixIcon: suffix,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(30),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(30),
-          borderSide: const BorderSide(color: accent, width: 1.6),
-        ),
       ),
     );
   }
