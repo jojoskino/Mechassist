@@ -1,3 +1,4 @@
 # Local dev / process files
 serve_pid.txt
 *.pid
+node_modules/

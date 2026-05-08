@@ -1,13 +1,14 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/firebase_bootstrap.dart';
 import '../services/push_service.dart';
 import '../widgets/intervention_chat_dialog.dart';
+import '../widgets/mechanic_nearby_map.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key});
@@ -16,26 +17,61 @@ class DashboardClient extends StatefulWidget {
   State<DashboardClient> createState() => _DashboardClientState();
 }
 
-class _DashboardClientState extends State<DashboardClient> {
+class _DashboardClientState extends State<DashboardClient> with WidgetsBindingObserver {
+  static const double _radiusKm = 30;
+
   List<dynamic> mechanics = [];
+  List<Map<String, dynamic>> _apiMechanics = [];
+  List<Map<String, dynamic>> _firestoreMechanics = [];
+  QuerySnapshot<Map<String, dynamic>>? _lastPresenceSnapshot;
+
   List<dynamic> requests = [];
   bool loading = true;
+  /// Premier chargement plein écran uniquement ; ensuite les onglets restent utilisables.
+  bool _initializing = true;
+  bool _showWebMapHint = true;
+  bool _sendingRequest = false;
   double? lat;
   double? lng;
   String currentName = 'Client';
   String currentRole = 'client';
   int _tabIndex = 0;
   Timer? _refreshTimer;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _presenceSub;
+  StreamSubscription<Position>? _positionSub;
+  DateTime? _lastLocationPost;
   String? lastError;
-
-  bool get _mapsSupported => true;
+  String? _googleMapsWebKey;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPublicConfig();
     _refreshAll();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) => _refreshAll(silent: true));
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshListsOnly());
     _syncPush();
+    _maybeStartPresenceListener();
+    _startPositionTracking();
+  }
+
+  Future<void> _loadPublicConfig() async {
+    final c = await ApiService.getClientConfig();
+    if (!mounted) {
+      return;
+    }
+    final raw = c['google_maps_web_api_key'];
+    final s = raw?.toString().trim();
+    setState(() {
+      _googleMapsWebKey = (s != null && s.isNotEmpty && s != 'null') ? s : null;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshAll(silent: true, requireFreshGps: false);
+    }
   }
 
   Future<void> _syncPush() async {
@@ -47,14 +83,123 @@ class _DashboardClientState extends State<DashboardClient> {
     }
   }
 
+  void _maybeStartPresenceListener() {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!FirebaseBootstrap.initialized) return;
+    if (_presenceSub != null) return;
+    try {
+      _presenceSub = FirebaseFirestore.instance.collection('mechanic_presence').snapshots().listen(
+            _onPresenceSnapshot,
+            onError: (_) {},
+          );
+    } catch (_) {}
+  }
+
+  void _onPresenceSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
+    if (!mounted) return;
+    _lastPresenceSnapshot = snap;
+    if (lat != null && lng != null) {
+      _applyPresenceSnapshot(snap);
+      setState(() {});
+    }
+  }
+
+  Map<String, dynamic>? _mechanicFromFirestoreDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+    double clientLat,
+    double clientLng,
+  ) {
+    final data = doc.data();
+    if (data['is_available'] != true) return null;
+    final ml = (data['latitude'] as num?)?.toDouble();
+    final mg = (data['longitude'] as num?)?.toDouble();
+    if (ml == null || mg == null) return null;
+    final id = ApiService.parseIntId(data['laravel_id']) ?? int.tryParse(doc.id);
+    if (id == null) return null;
+    final km = Geolocator.distanceBetween(clientLat, clientLng, ml, mg) / 1000.0;
+    return {
+      'id': id,
+      'name': data['name']?.toString() ?? '-',
+      'phone': data['phone']?.toString() ?? '',
+      'latitude': ml,
+      'longitude': mg,
+      'is_available': true,
+      'distance_km': double.parse(km.toStringAsFixed(2)),
+    };
+  }
+
+  void _applyPresenceSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
+    final clat = lat;
+    final clng = lng;
+    if (clat == null || clng == null) return;
+    final list = <Map<String, dynamic>>[];
+    for (final d in snap.docs) {
+      final m = _mechanicFromFirestoreDoc(d, clat, clng);
+      if (m != null) list.add(m);
+    }
+    _firestoreMechanics = list;
+    _recomputeMergedMechanics();
+  }
+
+  /// Seuls les mécaniciens renvoyés par l’API peuvent recevoir une demande (règles serveur).
+  /// Firestore ne fait qu’affiner position / fraîcheur pour les IDs déjà autorisés par l’API.
+  void _recomputeMergedMechanics() {
+    if (lat == null || lng == null) {
+      mechanics = List<dynamic>.from(_apiMechanics);
+      return;
+    }
+    final clat = lat!;
+    final clng = lng!;
+    final byId = <int, Map<String, dynamic>>{};
+    for (final raw in _apiMechanics) {
+      final id = ApiService.parseIntId(raw['id']);
+      if (id != null) {
+        byId[id] = Map<String, dynamic>.from(raw);
+      }
+    }
+    for (final raw in _firestoreMechanics) {
+      final id = ApiService.parseIntId(raw['id']);
+      if (id == null || !byId.containsKey(id)) {
+        continue;
+      }
+      final base = Map<String, dynamic>.from(byId[id]!);
+      final ml = (raw['latitude'] as num?)?.toDouble();
+      final mg = (raw['longitude'] as num?)?.toDouble();
+      if (ml != null && mg != null) {
+        base['latitude'] = ml;
+        base['longitude'] = mg;
+        final km = Geolocator.distanceBetween(clat, clng, ml, mg) / 1000.0;
+        base['distance_km'] = double.parse(km.toStringAsFixed(2));
+      }
+      byId[id] = base;
+    }
+    final merged = byId.values.where((m) {
+      final d = (m['distance_km'] as num?)?.toDouble();
+      return d != null && d <= _radiusKm;
+    }).toList()
+      ..sort(
+        (a, b) => ((a['distance_km'] as num).toDouble()).compareTo((b['distance_km'] as num).toDouble()),
+      );
+    mechanics = merged;
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _presenceSub?.cancel();
+    _positionSub?.cancel();
     super.dispose();
   }
 
-  Future<void> _refreshAll({bool silent = false}) async {
-    if (!silent) {
+  /// Rafraîchit mécaniciens + demandes en réutilisant la position déjà connue (rapide).
+  Future<void> _refreshListsOnly() async {
+    await _refreshAll(silent: true, requireFreshGps: false);
+  }
+
+  Future<void> _refreshAll({bool silent = false, bool requireFreshGps = true}) async {
+    if (!silent && _initializing) {
       setState(() => loading = true);
     }
     final token = await AuthStorage.getToken();
@@ -62,6 +207,7 @@ class _DashboardClientState extends State<DashboardClient> {
       if (!mounted) return;
       setState(() {
         loading = false;
+        _initializing = false;
         lastError = 'Session invalide, reconnecte-toi.';
       });
       return;
@@ -71,28 +217,47 @@ class _DashboardClientState extends State<DashboardClient> {
 
     String? errorMsg;
     try {
-      final position = await _getPosition();
-      if (position != null) {
-        lat = position.latitude;
-        lng = position.longitude;
-        final loc = await ApiService.updateLocation(token, lat!, lng!);
-        if ((loc['status'] as int?) != null && (loc['status'] as int) >= 400) {
-          errorMsg = loc['message']?.toString() ?? 'Erreur mise à jour position.';
+      final reuseCoords = lat != null && lng != null && !requireFreshGps;
+      if (!reuseCoords) {
+        final position = await _getPositionBestEffort();
+        if (position != null) {
+          lat = position.latitude;
+          lng = position.longitude;
+        }
+      }
+
+      if (lat != null && lng != null) {
+        if (requireFreshGps || _lastLocationPost == null) {
+          final loc = await ApiService.updateLocation(token, lat!, lng!);
+          if ((loc['status'] as int?) != null && (loc['status'] as int) >= 400) {
+            errorMsg = loc['message']?.toString() ?? 'Erreur mise à jour position.';
+          } else {
+            _lastLocationPost = DateTime.now();
+          }
         }
         final nearby = await ApiService.nearbyMechanics(token, lat!, lng!);
         final ns = nearby['status'] as int?;
         if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
-          mechanics = nearby['data'] as List;
+          _apiMechanics = (nearby['data'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
         } else {
-          mechanics = [];
+          _apiMechanics = [];
           errorMsg ??=
               nearby['message']?.toString() ?? 'Impossible de charger les mécaniciens (code ${nearby['status']}).';
         }
+        if (_lastPresenceSnapshot != null) {
+          _applyPresenceSnapshot(_lastPresenceSnapshot!);
+        } else {
+          _recomputeMergedMechanics();
+        }
+        _maybeStartPresenceListener();
       } else {
-        mechanics = [];
+        _apiMechanics = [];
+        _recomputeMergedMechanics();
         if (kIsWeb) {
           errorMsg ??=
-              'Géolocalisation indisponible sur le navigateur. Lance l’app sur Android ou un émulateur pour tester la carte.';
+              'Géolocalisation refusée ou indisponible dans le navigateur. Autorise la position pour ce site (icône à gauche de l’URL) puis rafraîchis.';
         } else {
           errorMsg ??=
               'Position GPS indisponible (services désactivés ou permission refusée). Active la localisation puis rafraîchis.';
@@ -114,28 +279,85 @@ class _DashboardClientState extends State<DashboardClient> {
     if (!mounted) return;
     setState(() {
       loading = false;
+      _initializing = false;
       lastError = errorMsg;
     });
   }
 
-  Future<Position?> _getPosition() async {
-    if (kIsWeb) {
-      return null;
+  Future<void> _startPositionTracking() async {
+    if (!await _ensureLocationPermission()) {
+      return;
     }
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return null;
+    final settings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: kIsWeb ? 0 : 12,
+    );
+    _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      (pos) {
+        lat = pos.latitude;
+        lng = pos.longitude;
+        final now = DateTime.now();
+        final last = _lastLocationPost;
+        if (last == null || now.difference(last) > const Duration(seconds: 10)) {
+          _lastLocationPost = now;
+          AuthStorage.getToken().then((token) {
+            if (token != null) {
+              ApiService.updateLocation(token, pos.latitude, pos.longitude);
+            }
+          });
+        }
+        if (_lastPresenceSnapshot != null) {
+          _applyPresenceSnapshot(_lastPresenceSnapshot!);
+        } else {
+          _recomputeMergedMechanics();
+        }
+        if (mounted) {
+          setState(() {});
+        }
+      },
+      onError: (_) {},
+    );
+  }
 
+  Future<bool> _ensureLocationPermission() async {
+    if (!kIsWeb) {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return false;
+      }
+    }
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    return permission != LocationPermission.denied && permission != LocationPermission.deniedForever;
+  }
+
+  /// Dernière position connue puis GPS actuel (évite d’attendre à chaque rafraîchissement).
+  Future<Position?> _getPositionBestEffort() async {
+    if (!await _ensureLocationPermission()) {
       return null;
     }
-    return Geolocator.getCurrentPosition().timeout(const Duration(seconds: 8), onTimeout: () => throw TimeoutException('GPS timeout'));
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) {
+        return last;
+      }
+    } catch (_) {}
+    try {
+      return await Geolocator.getCurrentPosition().timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => throw TimeoutException('GPS timeout'),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _createRequest(Map<String, dynamic> mechanic) async {
+    if (_sendingRequest) {
+      return;
+    }
     final descCtrl = TextEditingController();
     String vehicleType = 'voiture';
     final confirmed = await showDialog<bool>(
@@ -172,23 +394,40 @@ class _DashboardClientState extends State<DashboardClient> {
       ),
     );
 
-    if (confirmed != true || lat == null || lng == null) return;
+    if (confirmed != true) {
+      descCtrl.dispose();
+      return;
+    }
+    if (lat == null || lng == null) {
+      descCtrl.dispose();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Position indisponible. Autorise la géolocalisation puis réessaie.')),
+      );
+      return;
+    }
     final token = await AuthStorage.getToken();
-    if (token == null) return;
+    if (token == null) {
+      descCtrl.dispose();
+      return;
+    }
 
     final mechanicId = ApiService.parseIntId(mechanic['id']);
     if (mechanicId == null) {
+      descCtrl.dispose();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mécanicien invalide.')));
       return;
     }
     final desc = descCtrl.text.trim();
     if (desc.isEmpty) {
+      descCtrl.dispose();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ajoute une description de la panne.')));
       return;
     }
 
+    setState(() => _sendingRequest = true);
     final res = await ApiService.createRequest(
       token: token,
       mechanicId: mechanicId,
@@ -197,12 +436,28 @@ class _DashboardClientState extends State<DashboardClient> {
       clientLat: lat!,
       clientLng: lng!,
     );
+    descCtrl.dispose();
 
     if (!mounted) return;
+    final code = res['status'] as int?;
+    final ok = code != null && code >= 200 && code < 300;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(res['status'] == 201 ? 'Demande envoyée' : (res['message']?.toString() ?? 'Erreur'))),
+      SnackBar(
+        content: Text(
+          ok ? 'Demande envoyée au mécanicien.' : (res['message']?.toString() ?? 'Erreur (${code ?? '—'})'),
+        ),
+        backgroundColor: ok ? null : Colors.red.shade800,
+      ),
     );
-    await _refreshAll(silent: true);
+    if (ok) {
+      await _refreshAll(silent: true, requireFreshGps: false);
+      if (mounted) {
+        setState(() => _tabIndex = 1);
+      }
+    }
+    if (mounted) {
+      setState(() => _sendingRequest = false);
+    }
   }
 
   Future<void> _openChat(int requestId) async {
@@ -214,8 +469,6 @@ class _DashboardClientState extends State<DashboardClient> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = <Widget>[_buildHomeTab(), _buildRequestsTab()];
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FC),
       appBar: AppBar(
@@ -226,7 +479,7 @@ class _DashboardClientState extends State<DashboardClient> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _refreshAll,
+            onPressed: () => _refreshAll(silent: false, requireFreshGps: true),
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -242,9 +495,15 @@ class _DashboardClientState extends State<DashboardClient> {
           )
         ],
       ),
-      body: loading
+      body: _initializing && loading
           ? const Center(child: CircularProgressIndicator())
-          : pages[_tabIndex],
+          : IndexedStack(
+              index: _tabIndex,
+              children: [
+                _buildHomeTab(),
+                _buildRequestsTab(),
+              ],
+            ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIndex,
         onTap: (i) => setState(() => _tabIndex = i),
@@ -259,7 +518,7 @@ class _DashboardClientState extends State<DashboardClient> {
 
   Widget _buildHomeTab() {
     return RefreshIndicator(
-      onRefresh: _refreshAll,
+      onRefresh: () => _refreshAll(silent: false, requireFreshGps: true),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -273,58 +532,18 @@ class _DashboardClientState extends State<DashboardClient> {
             ),
           const Text('Mecaniciens proches', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-                  if (lat != null && lng != null && _mapsSupported)
+          if (lat != null && lng != null)
             SizedBox(
-              height: 220,
+              height: 300,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                        child: FlutterMap(
-                          options: MapOptions(
-                            initialCenter: LatLng(lat!, lng!),
-                            initialZoom: 13,
-                          ),
-                          children: [
-                            TileLayer(
-                              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'com.example.mechassist',
-                            ),
-                            MarkerLayer(
-                              markers: [
-                                Marker(
-                                  point: LatLng(lat!, lng!),
-                                  width: 36,
-                                  height: 36,
-                                  child: const Icon(Icons.my_location, color: Color(0xFF0F4C75), size: 28),
-                                ),
-                                ...mechanics.map((m) {
-                                  final map = Map<String, dynamic>.from(m as Map);
-                                  final ml = (map['latitude'] as num?)?.toDouble();
-                                  final mg = (map['longitude'] as num?)?.toDouble();
-                                  if (ml == null || mg == null) {
-                                    return null;
-                                  }
-                                  return Marker(
-                                    point: LatLng(ml, mg),
-                                    width: 32,
-                                    height: 32,
-                                    child: const Icon(Icons.build_circle, color: Colors.red, size: 26),
-                                  );
-                                }).whereType<Marker>(),
-                              ],
-                            ),
-                          ],
+                child: MechanicNearbyMap(
+                  clientLat: lat!,
+                  clientLng: lng!,
+                  mechanics: mechanics.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
+                  googleMapsWebApiKey: _googleMapsWebKey,
                 ),
               ),
-            ),
-          if (lat != null && lng != null && !_mapsSupported)
-            Container(
-              height: 100,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Text('Google Maps visible sur Android/iOS'),
             ),
           const SizedBox(height: 10),
           if (mechanics.isEmpty)
@@ -334,24 +553,57 @@ class _DashboardClientState extends State<DashboardClient> {
                 subtitle: Text('Essaie de rafraichir ou elargir la zone.'),
               ),
             ),
-          ...mechanics.map((m) => Card(
-                color: Colors.white,
-                child: ListTile(
-                  title: Text(m['name']?.toString() ?? '-'),
-                  subtitle: Text('${m['distance_km']} km • ${m['phone'] ?? ''}'),
-                  trailing: ElevatedButton(
-                    onPressed: () => _createRequest(Map<String, dynamic>.from(m as Map)),
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F4C75)),
-                    child: const Text('Demander'),
-                  ),
+          ...mechanics.map((raw) {
+            final m = Map<String, dynamic>.from(raw as Map);
+            return Card(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      m['name']?.toString() ?? 'Mécanicien',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${m['distance_km']} km • ${m['phone'] ?? ''}'
+                      '${m['is_online'] == true ? ' · En ligne' : ''}',
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: _sendingRequest ? null : () => _createRequest(m),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F4C75),
+                        minimumSize: const Size.fromHeight(50),
+                      ),
+                      child: _sendingRequest
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Demander'),
+                    ),
+                  ],
                 ),
-              )),
-          if (kIsWeb)
-            const Card(
+              ),
+            );
+          }),
+          if (kIsWeb && _showWebMapHint)
+            Card(
               child: ListTile(
-                leading: Icon(Icons.info_outline),
-                title: Text('Geolocalisation limitee sur Web'),
-                subtitle: Text('Teste la carte/geolocalisation surtout sur Android.'),
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Aide carte (Web)'),
+                subtitle: const Text(
+                  'Autorise la géolocalisation dans le navigateur. Clé Google Maps optionnelle côté serveur (GOOGLE_MAPS_WEB_API_KEY) ; sinon carte Carto.',
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(() => _showWebMapHint = false),
+                  tooltip: 'Masquer',
+                ),
               ),
             ),
         ],
@@ -359,42 +611,98 @@ class _DashboardClientState extends State<DashboardClient> {
     );
   }
 
-  Widget _buildRequestsTab() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('Mes demandes', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        if (requests.isEmpty)
-          const Card(
-            child: ListTile(
-              title: Text('Aucune demande pour le moment'),
-              subtitle: Text('Envoie une demande a un mecanicien proche.'),
-            ),
+  String _mechanicNameFromRequest(Map<String, dynamic> r) {
+    final m = r['mechanic'];
+    if (m is Map) {
+      return m['name']?.toString() ?? '—';
+    }
+    return '—';
+  }
+
+  void _showRequestDetail(Map<String, dynamic> r) {
+    final id = ApiService.parseIntId(r['id']);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Demande #${id ?? '—'}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
+              const SizedBox(height: 8),
+              Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
+              const SizedBox(height: 8),
+              Text('Statut : ${r['status'] ?? '—'}'),
+              const SizedBox(height: 8),
+              Text(r['description']?.toString() ?? ''),
+            ],
           ),
-        ...requests.map((r) => Card(
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
+          if (r['status']?.toString() == 'accepted' && id != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openChat(id);
+              },
+              child: const Text('Ouvrir le chat'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRequestsTab() {
+    return RefreshIndicator(
+      onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text('Mes demandes', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          if (requests.isEmpty)
+            const Card(
               child: ListTile(
-                title: Text('${r['vehicle_type']} • ${r['status']}'),
-                subtitle: Text(r['description']?.toString() ?? ''),
+                title: Text('Aucune demande pour le moment'),
+                subtitle: Text('Envoie une demande depuis l’onglet Proches.'),
+              ),
+            ),
+          ...requests.map((raw) {
+            final r = Map<String, dynamic>.from(raw as Map);
+            return Card(
+              child: ListTile(
+                title: Text('${r['vehicle_type'] ?? '—'} • ${_mechanicNameFromRequest(r)}'),
+                subtitle: Text(
+                  '${r['description']?.toString() ?? ''}\n'
+                  '${switch (r['status']?.toString()) {
+                    'pending' => 'En attente de réponse',
+                    'accepted' => 'Acceptée — touche pour détails ou Chat',
+                    'declined' => 'Refusée',
+                    _ => 'Statut : ${r['status']}',
+                  }}',
+                ),
+                isThreeLine: true,
+                onTap: () => _showRequestDetail(r),
                 trailing: r['status']?.toString() == 'accepted'
                     ? TextButton(
                         onPressed: () {
                           final id = ApiService.parseIntId(r['id']);
-                          if (id != null) _openChat(id);
+                          if (id != null) {
+                            _openChat(id);
+                          }
                         },
                         child: const Text('Chat'),
                       )
-                    : Text(
-                        switch (r['status']?.toString()) {
-                          'pending' => 'En attente',
-                          'declined' => 'Refusée',
-                          _ => 'Statut: ${r['status']}',
-                        },
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                      ),
+                    : const Icon(Icons.chevron_right),
               ),
-            )),
-      ],
+            );
+          }),
+        ],
+      ),
     );
   }
 }

@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Écriture : Admin SDK (Laravel + compte de service). Lecture : app client (temps réel).
+    match /mechanic_presence/{mechanicId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

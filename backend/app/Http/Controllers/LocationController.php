@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
 
 class LocationController extends Controller
 {
-    public function update(Request $request)
+    public function update(Request $request, FirestoreSyncService $firestore)
     {
         $validated = $request->validate([
             'latitude' => 'required|numeric|between:-90,90',
@@ -17,8 +18,14 @@ class LocationController extends Controller
         $user->latitude = $validated['latitude'];
         $user->longitude = $validated['longitude'];
         $user->last_location_at = now();
+        if ($user->role === 'mecanicien') {
+            $user->last_seen_at = now();
+        }
         $user->save();
 
-        return response()->json($user->fresh());
+        $fresh = $user->fresh();
+        $firestore->syncMechanicPresence($fresh);
+
+        return response()->json($fresh);
     }
 }

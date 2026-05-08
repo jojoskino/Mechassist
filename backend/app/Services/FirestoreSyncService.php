@@ -238,4 +238,46 @@ class FirestoreSyncService
             Log::warning('FirestoreSync: message', ['message' => $e->getMessage()]);
         }
     }
+
+    /**
+     * Publie la présence d’un mécanicien pour que les clients puissent s’abonner en temps quasi réel.
+     */
+    public function syncMechanicPresence(User $user): void
+    {
+        if (! $this->enabled() || $user->role !== 'mecanicien') {
+            return;
+        }
+        try {
+            $id = (string) $user->id;
+            $fields = [
+                'laravel_id' => ['integerValue' => $id],
+                'name' => ['stringValue' => (string) $user->name],
+                'phone' => ['stringValue' => (string) ($user->phone ?? '')],
+                'is_available' => ['booleanValue' => (bool) $user->is_available],
+                'updated_at' => $this->timestampValue($user->updated_at ?? new \DateTimeImmutable),
+            ];
+            if ($user->last_seen_at !== null) {
+                $fields['last_seen_at'] = $this->timestampValue($user->last_seen_at);
+            } else {
+                $fields['last_seen_at'] = ['nullValue' => null];
+            }
+            if ($user->latitude !== null && $user->longitude !== null) {
+                $fields['latitude'] = ['doubleValue' => (float) $user->latitude];
+                $fields['longitude'] = ['doubleValue' => (float) $user->longitude];
+            } else {
+                $fields['latitude'] = ['nullValue' => null];
+                $fields['longitude'] = ['nullValue' => null];
+            }
+            $created = $this->createRootCollectionDocument('mechanic_presence', $id, $fields);
+            if (! $created) {
+                $this->patchDocument(
+                    'mechanic_presence/'.$id,
+                    $fields,
+                    array_keys($fields)
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning('FirestoreSync: mechanic_presence', ['message' => $e->getMessage()]);
+        }
+    }
 }

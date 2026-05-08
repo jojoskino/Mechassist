@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/google_sign_in_service.dart';
 import '../services/push_service.dart';
 import '../widgets/auth_shell.dart';
 import 'register_screen.dart';
@@ -34,11 +35,15 @@ class _LoginScreenState extends State<LoginScreen> {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getBool('mechassist_remember_me') ?? false;
     final em = prefs.getString('mechassist_saved_email');
+    final pw = prefs.getString('mechassist_saved_password');
     if (!mounted) return;
     setState(() {
       rememberMe = saved;
       if (em != null && em.isNotEmpty) {
         emailCtrl.text = em;
+      }
+      if (saved && pw != null && pw.isNotEmpty) {
+        passwordCtrl.text = pw;
       }
     });
   }
@@ -55,9 +60,45 @@ class _LoginScreenState extends State<LoginScreen> {
     if (rememberMe) {
       await prefs.setBool('mechassist_remember_me', true);
       await prefs.setString('mechassist_saved_email', emailCtrl.text.trim());
+      await prefs.setString('mechassist_saved_password', passwordCtrl.text);
     } else {
       await prefs.remove('mechassist_remember_me');
       await prefs.remove('mechassist_saved_email');
+      await prefs.remove('mechassist_saved_password');
+    }
+  }
+
+  Future<void> _googleLogin() async {
+    setState(() => isLoading = true);
+    try {
+      final idToken = await GoogleSignInService.signInForIdToken();
+      if (!mounted) return;
+      if (idToken == null) {
+        setState(() => isLoading = false);
+        return;
+      }
+      final fcmToken = await PushService.initAndGetToken();
+      final res = await ApiService.googleLogin(idToken: idToken, fcmToken: fcmToken);
+      if (!mounted) return;
+      setState(() => isLoading = false);
+
+      if (res['status'] == 200 && res['token'] != null) {
+        final user = res['user'] as Map<String, dynamic>? ?? {};
+        await AuthStorage.save(
+          token: res['token'].toString(),
+          role: user['role']?.toString() ?? 'client',
+          name: user['name']?.toString() ?? '',
+        );
+        await ApiService.updatePushToken(res['token'].toString(), fcmToken);
+        if (!mounted) return;
+        _navigateByRole(user['role']?.toString() ?? 'client');
+      } else {
+        _showSnack(res['message']?.toString() ?? 'Connexion Google impossible', isError: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      _showSnack(e.toString(), isError: true);
     }
   }
 
@@ -206,15 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 18),
           OutlinedButton(
-            onPressed: isLoading
-                ? null
-                : () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Connexion Google : bientôt disponible.'),
-                      ),
-                    );
-                  },
+            onPressed: isLoading ? null : _googleLogin,
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF10324A),
               minimumSize: const Size.fromHeight(52),

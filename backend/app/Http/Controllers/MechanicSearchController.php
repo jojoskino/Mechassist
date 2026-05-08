@@ -19,16 +19,30 @@ class MechanicSearchController extends Controller
         $lat = (float) $validated['latitude'];
         $lng = (float) $validated['longitude'];
 
+        $onlineBefore = now()->subMinutes(5);
+
         $mechanics = User::query()
             ->where('role', 'mecanicien')
             ->where('is_available', true)
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
-            ->get(['id', 'name', 'phone', 'latitude', 'longitude', 'is_available', 'last_location_at']);
+            ->where(function ($q) use ($onlineBefore) {
+                $q->where(function ($q2) use ($onlineBefore) {
+                    $q2->whereNotNull('last_seen_at')
+                        ->where('last_seen_at', '>=', $onlineBefore);
+                })->orWhere(function ($q2) use ($onlineBefore) {
+                    $q2->whereNull('last_seen_at')
+                        ->whereNotNull('last_location_at')
+                        ->where('last_location_at', '>=', $onlineBefore);
+                });
+            })
+            ->get(['id', 'name', 'phone', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at']);
 
-        $withDistance = $mechanics->map(function (User $u) use ($lat, $lng) {
+        $withDistance = $mechanics->map(function (User $u) use ($lat, $lng, $onlineBefore) {
             $km = self::haversineKm($lat, $lng, (float) $u->latitude, (float) $u->longitude);
             $u->setAttribute('distance_km', round($km, 2));
+            $seen = $u->last_seen_at ?? $u->last_location_at;
+            $u->setAttribute('is_online', $seen !== null && $seen->gte($onlineBefore));
 
             return $u;
         })->filter(fn (User $u) => $u->distance_km <= $radius)

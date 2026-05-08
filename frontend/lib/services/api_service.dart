@@ -6,6 +6,11 @@ import 'package:http/http.dart' as http;
 /// Sur un téléphone physique, remplacez par l’IP LAN de votre PC (ex. http://192.168.1.10:8000).
 class ApiService {
   static String get _apiRoot {
+    const fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    if (fromEnv.isNotEmpty) {
+      final base = fromEnv.replaceAll(RegExp(r'/+$'), '');
+      return '$base/api';
+    }
     if (kIsWeb) {
       return 'http://127.0.0.1:8000/api';
     }
@@ -54,6 +59,42 @@ class ApiService {
         'status': response.statusCode,
         'message': raw.isNotEmpty ? raw : 'Réponse invalide du serveur',
       };
+    }
+  }
+
+  static Future<Map<String, dynamic>> getClientConfig() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_apiRoot/client-config'),
+        headers: const {'Accept': 'application/json'},
+      );
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> googleLogin({
+    required String idToken,
+    String? role,
+    String? fcmToken,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiRoot/auth/google'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'id_token': idToken,
+          if (role != null && role.isNotEmpty) 'role': role,
+          if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
+        }),
+      );
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
   }
 
@@ -313,6 +354,18 @@ class ApiService {
         Uri.parse('$_apiRoot/requests/$requestId/messages'),
         headers: _authHeaders(token),
         body: jsonEncode({'body': body}),
+      );
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> touchPresence(String token) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiRoot/presence/touch'),
+        headers: _authHeaders(token),
       );
       return _parseBody(response);
     } catch (e) {

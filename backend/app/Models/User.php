@@ -22,6 +22,7 @@ class User extends Authenticatable
         'latitude',
         'longitude',
         'last_location_at',
+        'last_seen_at',
         'fcm_token',
     ];
 
@@ -39,6 +40,7 @@ class User extends Authenticatable
             'latitude' => 'float',
             'longitude' => 'float',
             'last_location_at' => 'datetime',
+            'last_seen_at' => 'datetime',
         ];
     }
 
@@ -50,5 +52,21 @@ class User extends Authenticatable
     public function mechanicRequests(): HasMany
     {
         return $this->hasMany(InterventionRequest::class, 'mechanic_id');
+    }
+
+    /**
+     * Même logique que la liste « mécaniciens proches » : dispo + activité récente.
+     */
+    public function isReachableMechanic(?\DateTimeInterface $since = null): bool
+    {
+        if ($this->role !== 'mecanicien' || ! $this->is_available) {
+            return false;
+        }
+        $cutoff = $since !== null
+            ? \Illuminate\Support\Carbon::instance(\DateTimeImmutable::createFromInterface($since))
+            : now()->subMinutes(5);
+        $seen = $this->last_seen_at ?? $this->last_location_at;
+
+        return $seen !== null && $seen->gte($cutoff);
     }
 }

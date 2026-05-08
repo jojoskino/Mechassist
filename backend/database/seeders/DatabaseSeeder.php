@@ -50,6 +50,7 @@ class DatabaseSeeder extends Seeder
                 'latitude' => $demoLat,
                 'longitude' => $demoLng,
                 'last_location_at' => now(),
+                'last_seen_at' => now(),
             ]
         );
     }

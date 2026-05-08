@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
 
 class ProfileController extends Controller
@@ -11,7 +12,7 @@ class ProfileController extends Controller
         return response()->json($request->user());
     }
 
-    public function update(Request $request)
+    public function update(Request $request, FirestoreSyncService $firestore)
     {
         $user = $request->user();
         $rules = [
@@ -24,8 +25,14 @@ class ProfileController extends Controller
 
         $validated = $request->validate($rules);
         $user->fill($validated);
+        if ($user->role === 'mecanicien' && array_key_exists('is_available', $validated) && $validated['is_available']) {
+            $user->last_seen_at = now();
+        }
         $user->save();
 
-        return response()->json($user->fresh());
+        $fresh = $user->fresh();
+        $firestore->syncMechanicPresence($fresh);
+
+        return response()->json($fresh);
     }
 }

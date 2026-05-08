@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/google_sign_in_service.dart';
 import '../services/push_service.dart';
 import '../widgets/auth_shell.dart';
 
@@ -34,6 +35,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
     passwordCtrl.dispose();
     passwordConfirmCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _googleRegister() async {
+    setState(() => isLoading = true);
+    try {
+      final idToken = await GoogleSignInService.signInForIdToken();
+      if (!mounted) return;
+      if (idToken == null) {
+        setState(() => isLoading = false);
+        return;
+      }
+      final fcmToken = await PushService.initAndGetToken();
+      final res = await ApiService.googleLogin(idToken: idToken, role: role, fcmToken: fcmToken);
+      if (!mounted) return;
+      setState(() => isLoading = false);
+
+      if (res['status'] == 200 && res['token'] != null) {
+        final user = res['user'] as Map<String, dynamic>? ?? {};
+        await AuthStorage.save(
+          token: res['token'].toString(),
+          role: user['role']?.toString() ?? role,
+          name: user['name']?.toString() ?? '',
+        );
+        await ApiService.updatePushToken(res['token'].toString(), fcmToken);
+        if (!mounted) return;
+        _showSnack('Compte Google relié avec succès');
+        Navigator.pushReplacementNamed(
+          context,
+          (user['role']?.toString() ?? role) == 'mecanicien' ? '/mecanicien' : '/client',
+        );
+      } else {
+        final msg = res['message']?.toString() ?? 'Inscription Google impossible';
+        _showSnack(msg, isError: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      _showSnack(e.toString(), isError: true);
+    }
   }
 
   Future<void> _register() async {
@@ -212,13 +252,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
           const SizedBox(height: 18),
           OutlinedButton(
-            onPressed: isLoading
-                ? null
-                : () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Inscription Google : bientôt disponible.')),
-                    );
-                  },
+            onPressed: isLoading ? null : _googleRegister,
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF10324A),
               minimumSize: const Size.fromHeight(52),
@@ -246,7 +280,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text('Se connecter avec Google', style: TextStyle(fontWeight: FontWeight.w500)),
+                const Text("S'inscrire avec Google", style: TextStyle(fontWeight: FontWeight.w500)),
               ],
             ),
           ),

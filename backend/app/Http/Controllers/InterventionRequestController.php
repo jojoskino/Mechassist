@@ -64,8 +64,8 @@ class InterventionRequestController extends Controller
         if ($mechanic->id === $request->user()->id) {
             return response()->json(['message' => 'Vous ne pouvez pas vous auto-assigner une demande.'], 422);
         }
-        if ($mechanic->role !== 'mecanicien' || ! $mechanic->is_available) {
-            return response()->json(['message' => 'Ce mécanicien n’est pas disponible.'], 422);
+        if (! $mechanic->isReachableMechanic()) {
+            return response()->json(['message' => 'Ce mécanicien n’est pas disponible ou plus en ligne.'], 422);
         }
 
         $alreadyOpen = InterventionRequest::query()

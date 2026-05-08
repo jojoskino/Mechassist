@@ -1,0 +1,11 @@
+{
+  "name": "mechassist-tooling",
+  "private": true,
+  "description": "Deploiement Firestore rules (racine du depot).",
+  "scripts": {
+    "deploy:firestore-rules": "firebase deploy --only firestore:rules --project mechassist-ed9dc"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.29.1"
+  }
+}

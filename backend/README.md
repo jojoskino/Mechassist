@@ -7,6 +7,19 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## MechAssist (API locale)
+
+```bash
+composer install
+# Crée la base PostgreSQL `mechassist` (ou adapte .env), puis :
+php artisan migrate --seed
+php artisan serve --host=127.0.0.1 --port=8000
+```
+
+Copie `.env.example` vers `.env`, configure `DB_*` pour PostgreSQL, `FCM_SERVER_KEY` (notifications push), et optionnellement `GOOGLE_MAPS_WEB_API_KEY` (carte Flutter Web).
+
+L’app Flutter est dans `../frontend`. Build Android : voir `../frontend/README.md` et `../scripts/fix-flutter-android-build.ps1`.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

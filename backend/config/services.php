@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    /*
+    | Connexion Google (id_token côté app → vérification tokeninfo / audience).
+    | Utiliser un client OAuth de type « Application Web » comme GOOGLE_CLIENT_ID
+    | (même valeur que serverClientId dans Flutter pour obtenir un id_token vérifiable).
+    */
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'android_client_id' => env('GOOGLE_ANDROID_CLIENT_ID'),
+    ],
+
 ];

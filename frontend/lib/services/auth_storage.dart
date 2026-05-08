@@ -33,7 +33,9 @@ class AuthStorage {
 
   static Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await prefs.remove(_tokenKey);
+    await prefs.remove(_roleKey);
+    await prefs.remove(_nameKey);
   }
 
   static Future<bool> isLoggedIn() async {

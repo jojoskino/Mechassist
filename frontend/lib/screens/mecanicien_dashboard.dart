@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
 import '../services/push_service.dart';
@@ -19,6 +21,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   String currentName = 'Mecanicien';
   String currentRole = 'mecanicien';
   Timer? _refreshTimer;
+  Timer? _presenceTimer;
+  StreamSubscription<Position>? _positionSub;
+  DateTime? _lastLocationPost;
   String? lastError;
 
   @override
@@ -26,7 +31,73 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     super.initState();
     _refresh();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh(silent: true));
+    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _touchPresence());
     _syncPush();
+    _bootstrapLocation();
+  }
+
+  Future<bool> _ensureLocationPermission() async {
+    if (!kIsWeb) {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return false;
+      }
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission != LocationPermission.denied && permission != LocationPermission.deniedForever;
+  }
+
+  Future<void> _bootstrapLocation() async {
+    if (!await _ensureLocationPermission()) {
+      return;
+    }
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) {
+        await _pushLocation(last.latitude, last.longitude, force: true);
+      }
+    } catch (_) {}
+    try {
+      final pos = await Geolocator.getCurrentPosition().timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => throw TimeoutException('GPS timeout'),
+      );
+      await _pushLocation(pos.latitude, pos.longitude, force: true);
+    } catch (_) {}
+
+    final settings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: kIsWeb ? 0 : 12,
+    );
+    _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      (pos) {
+        _pushLocation(pos.latitude, pos.longitude);
+      },
+      onError: (_) {},
+    );
+  }
+
+  Future<void> _pushLocation(double lat, double lng, {bool force = false}) async {
+    final now = DateTime.now();
+    final last = _lastLocationPost;
+    if (!force && last != null && now.difference(last) < const Duration(seconds: 10)) {
+      return;
+    }
+    final token = await AuthStorage.getToken();
+    if (token == null) return;
+    _lastLocationPost = now;
+    await ApiService.updateLocation(token, lat, lng);
+  }
+
+  Future<void> _touchPresence() async {
+    final token = await AuthStorage.getToken();
+    if (token == null) {
+      return;
+    }
+    await ApiService.touchPresence(token);
   }
 
   Future<void> _syncPush() async {
@@ -41,6 +112,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _presenceTimer?.cancel();
+    _positionSub?.cancel();
     super.dispose();
   }
 
@@ -69,6 +142,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
             : rawAvail == 1 || rawAvail == true || rawAvail?.toString() == '1';
         currentName = me['name']?.toString() ?? 'Mecanicien';
         currentRole = me['role']?.toString() ?? 'mecanicien';
+        await _touchPresence();
       } else {
         errorMsg = me['message']?.toString() ?? 'Session invalide ou API injoignable (${me['status']}).';
       }
