@@ -33,17 +33,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _loadRememberedEmail() async {
     final prefs = await SharedPreferences.getInstance();
+    // Ne plus conserver le mot de passe (anciennes installs) : on ne garde que l’email.
+    await prefs.remove('mechassist_saved_password');
     final saved = prefs.getBool('mechassist_remember_me') ?? false;
     final em = prefs.getString('mechassist_saved_email');
-    final pw = prefs.getString('mechassist_saved_password');
     if (!mounted) return;
     setState(() {
       rememberMe = saved;
       if (em != null && em.isNotEmpty) {
         emailCtrl.text = em;
-      }
-      if (saved && pw != null && pw.isNotEmpty) {
-        passwordCtrl.text = pw;
       }
     });
   }
@@ -57,15 +55,29 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _persistRemember() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('mechassist_saved_password');
     if (rememberMe) {
       await prefs.setBool('mechassist_remember_me', true);
       await prefs.setString('mechassist_saved_email', emailCtrl.text.trim());
-      await prefs.setString('mechassist_saved_password', passwordCtrl.text);
     } else {
       await prefs.remove('mechassist_remember_me');
       await prefs.remove('mechassist_saved_email');
-      await prefs.remove('mechassist_saved_password');
     }
+  }
+
+  /// Après Google : enregistre l’email si « Se souvenir de moi » est coché (sans mot de passe).
+  Future<void> _persistRememberEmailFromUser(Map<String, dynamic> user) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('mechassist_saved_password');
+    if (!rememberMe) {
+      await prefs.remove('mechassist_remember_me');
+      await prefs.remove('mechassist_saved_email');
+      return;
+    }
+    final em = user['email']?.toString().trim() ?? '';
+    if (em.isEmpty) return;
+    await prefs.setBool('mechassist_remember_me', true);
+    await prefs.setString('mechassist_saved_email', em);
   }
 
   Future<void> _googleLogin() async {
@@ -84,6 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (res['status'] == 200 && res['token'] != null) {
         final user = res['user'] as Map<String, dynamic>? ?? {};
+        await _persistRememberEmailFromUser(user);
         await AuthStorage.save(
           token: res['token'].toString(),
           role: user['role']?.toString() ?? 'client',
@@ -181,7 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: GestureDetector(
                   onTap: () => setState(() => rememberMe = !rememberMe),
                   child: const Text(
-                    'Se souvenir de moi',
+                    'Se souvenir de moi (email)',
                     style: TextStyle(fontSize: 15, color: Color(0xFF10324A)),
                   ),
                 ),

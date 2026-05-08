@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/google_sign_in_service.dart';
 import '../services/push_service.dart';
 import '../widgets/intervention_chat_dialog.dart';
 
@@ -222,6 +223,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
               if (token != null) {
                 await ApiService.logout(token);
               }
+              await GoogleSignInService.signOut();
               await AuthStorage.clear();
               if (!context.mounted) return;
               Navigator.pushReplacementNamed(context, '/login');
