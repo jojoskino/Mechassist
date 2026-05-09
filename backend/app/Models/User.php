@@ -54,6 +54,11 @@ class User extends Authenticatable
         return $this->hasMany(InterventionRequest::class, 'mechanic_id');
     }
 
+    public function ratingsReceived(): HasMany
+    {
+        return $this->hasMany(MechanicRating::class, 'mechanic_id');
+    }
+
     /**
      * Même logique que la liste « mécaniciens proches » : dispo + activité récente.
      */

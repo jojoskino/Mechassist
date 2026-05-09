@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\InterventionRequest;
+use App\Models\MechanicRating;
 use App\Models\User;
 use App\Services\FcmService;
 use App\Services\FirestoreSyncService;
@@ -25,10 +26,14 @@ class InterventionRequestController extends Controller
         }
 
         $validated = $request->validate([
-            'status' => 'sometimes|in:pending,accepted,declined',
+            'status' => 'sometimes|in:pending,accepted,declined,completed',
         ]);
 
-        $q = InterventionRequest::query()->with(['client:id,name,phone', 'mechanic:id,name,phone']);
+        $q = InterventionRequest::query()->with([
+            'client:id,name,phone',
+            'mechanic:id,name,phone',
+            'mechanicRating',
+        ]);
 
         if ($user->role === 'client') {
             $q->where('client_id', $user->id);
@@ -109,10 +114,99 @@ class InterventionRequestController extends Controller
 
     public function show(Request $request, int $id)
     {
-        $row = InterventionRequest::query()->with(['client:id,name,phone', 'mechanic:id,name,phone'])->findOrFail($id);
+        $row = InterventionRequest::query()->with([
+            'client:id,name,phone',
+            'mechanic:id,name,phone',
+            'mechanicRating',
+        ])->findOrFail($id);
         $this->authorizeParticipant($request->user()->id, $row);
 
         return response()->json($this->transform($row));
+    }
+
+    /**
+     * Clôture par le client : panne réglée ou non, puis possibilité de noter le mécanicien.
+     */
+    public function recordOutcome(Request $request, int $id)
+    {
+        if ($request->user()->role !== 'client') {
+            return response()->json(['message' => 'Seuls les clients peuvent clôturer une demande.'], 403);
+        }
+
+        $row = InterventionRequest::query()->findOrFail($id);
+        if ($row->client_id !== $request->user()->id) {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+        if ($row->status !== 'accepted') {
+            return response()->json(['message' => 'Cette demande n’est pas en cours (acceptée).'], 422);
+        }
+
+        $validated = $request->validate([
+            'outcome' => 'required|in:fixed,not_fixed',
+        ]);
+
+        $row->status = 'completed';
+        $row->outcome = $validated['outcome'];
+        $row->outcome_at = now();
+        $row->save();
+
+        $row->load(['client:id,name,phone', 'mechanic:id,name,phone', 'mechanicRating']);
+
+        $this->fcmService->sendToToken(
+            $row->mechanic?->fcm_token,
+            'Intervention clôturée',
+            'Le client a indiqué que la panne était '.($validated['outcome'] === 'fixed' ? 'réglée' : 'non réglée').'.',
+            ['type' => 'request_completed', 'request_id' => (string) $row->id]
+        );
+
+        $this->firestoreSync->syncInterventionRequest($row->fresh());
+
+        return response()->json($this->transform($row->fresh()));
+    }
+
+    /**
+     * Note le mécanicien pour cette intervention (une seule fois).
+     */
+    public function storeRating(Request $request, int $id)
+    {
+        if ($request->user()->role !== 'client') {
+            return response()->json(['message' => 'Seuls les clients peuvent noter.'], 403);
+        }
+
+        $row = InterventionRequest::query()->with('mechanicRating')->findOrFail($id);
+        if ($row->client_id !== $request->user()->id) {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+        if ($row->status !== 'completed' || $row->outcome === null) {
+            return response()->json(['message' => 'Clôture d’abord l’intervention avant de noter.'], 422);
+        }
+        if ($row->mechanicRating !== null) {
+            return response()->json(['message' => 'Tu as déjà noté cette intervention.'], 409);
+        }
+
+        $validated = $request->validate([
+            'stars' => 'required|integer|min:1|max:5',
+            'comment' => 'nullable|string|max:2000',
+        ]);
+
+        MechanicRating::query()->create([
+            'intervention_request_id' => $row->id,
+            'client_id' => $request->user()->id,
+            'mechanic_id' => $row->mechanic_id,
+            'stars' => $validated['stars'],
+            'comment' => $validated['comment'] ?? null,
+        ]);
+
+        $fresh = $row->fresh(['client:id,name,phone', 'mechanic:id,name,phone', 'mechanicRating']);
+
+        $this->fcmService->sendToToken(
+            $fresh->mechanic?->fcm_token,
+            'Nouvelle note',
+            'Un client t’a attribué '.$validated['stars'].'/5 pour une intervention.',
+            ['type' => 'mechanic_rated', 'request_id' => (string) $fresh->id]
+        );
+
+        return response()->json($this->transform($fresh), 201);
     }
 
     public function accept(Request $request, int $id)
@@ -190,6 +284,21 @@ class InterventionRequestController extends Controller
         $data['photo_url'] = $r->photo_path
             ? Storage::disk('public')->url($r->photo_path)
             : null;
+
+        $data['rating'] = null;
+        if ($r->relationLoaded('mechanicRating') && $r->mechanicRating) {
+            $data['rating'] = [
+                'stars' => $r->mechanicRating->stars,
+                'comment' => $r->mechanicRating->comment,
+                'created_at' => $r->mechanicRating->created_at?->toIso8601String(),
+            ];
+        } elseif ($r->mechanicRating) {
+            $data['rating'] = [
+                'stars' => $r->mechanicRating->stars,
+                'comment' => $r->mechanicRating->comment,
+                'created_at' => $r->mechanicRating->created_at?->toIso8601String(),
+            ];
+        }
 
         return $data;
     }

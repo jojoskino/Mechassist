@@ -30,6 +30,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/requests/{id}', [InterventionRequestController::class, 'show']);
     Route::post('/requests/{id}/accept', [InterventionRequestController::class, 'accept']);
     Route::post('/requests/{id}/decline', [InterventionRequestController::class, 'decline']);
+    Route::post('/requests/{id}/outcome', [InterventionRequestController::class, 'recordOutcome']);
+    Route::post('/requests/{id}/rating', [InterventionRequestController::class, 'storeRating']);
 
     Route::get('/requests/{id}/messages', [ChatMessageController::class, 'index']);
     Route::post('/requests/{id}/messages', [ChatMessageController::class, 'store']);

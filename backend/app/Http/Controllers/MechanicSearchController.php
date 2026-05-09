@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MechanicRating;
 use App\Models\User;
 use Illuminate\Http\Request;
 
@@ -48,6 +49,22 @@ class MechanicSearchController extends Controller
         })->filter(fn (User $u) => $u->distance_km <= $radius)
             ->sortBy('distance_km')
             ->values();
+
+        $ids = $withDistance->pluck('id')->all();
+        if ($ids !== []) {
+            $agg = MechanicRating::query()
+                ->whereIn('mechanic_id', $ids)
+                ->selectRaw('mechanic_id, AVG(stars)::float as rating_avg, COUNT(*)::int as rating_count')
+                ->groupBy('mechanic_id')
+                ->get()
+                ->keyBy('mechanic_id');
+
+            $withDistance->each(function (User $u) use ($agg) {
+                $row = $agg->get($u->id);
+                $u->setAttribute('rating_avg', $row ? round((float) $row->rating_avg, 2) : null);
+                $u->setAttribute('rating_count', $row ? (int) $row->rating_count : 0);
+            });
+        }
 
         return response()->json($withDistance);
     }

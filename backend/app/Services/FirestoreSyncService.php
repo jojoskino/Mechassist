@@ -182,6 +182,9 @@ class FirestoreSyncService
                 'client_lng' => ['doubleValue' => (float) $row->client_lng],
                 'updated_at' => $this->timestampValue($row->updated_at ?? new \DateTimeImmutable),
             ];
+            if ($row->outcome) {
+                $fields['outcome'] = ['stringValue' => (string) $row->outcome];
+            }
             if ($row->photo_path) {
                 $fields['photo_path'] = ['stringValue' => (string) $row->photo_path];
             }

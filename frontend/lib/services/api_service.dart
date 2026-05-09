@@ -324,6 +324,45 @@ class ApiService {
     }
   }
 
+  /// [outcome] : `fixed` ou `not_fixed` — clôture une demande acceptée.
+  static Future<Map<String, dynamic>> recordRequestOutcome(
+    String token,
+    int requestId,
+    String outcome,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiRoot/requests/$requestId/outcome'),
+        headers: _authHeaders(token),
+        body: jsonEncode({'outcome': outcome}),
+      );
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> rateMechanicForRequest(
+    String token,
+    int requestId, {
+    required int stars,
+    String? comment,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiRoot/requests/$requestId/rating'),
+        headers: _authHeaders(token),
+        body: jsonEncode({
+          'stars': stars,
+          if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+        }),
+      );
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> listMessages(String token, int requestId) async {
     try {
       final response = await http.get(

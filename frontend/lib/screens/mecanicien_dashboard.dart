@@ -118,6 +118,23 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     super.dispose();
   }
 
+  String _mechanicRequestExtraLine(Map<String, dynamic> r) {
+    if (r['status']?.toString() != 'completed') return '';
+    final parts = <String>[];
+    final o = r['outcome']?.toString();
+    if (o == 'fixed') parts.add('Client : panne réglée');
+    if (o == 'not_fixed') parts.add('Client : panne non réglée');
+    final rt = r['rating'];
+    if (rt is Map && rt['stars'] != null) {
+      parts.add('Note client : ${rt['stars']}/5');
+      final c = rt['comment']?.toString();
+      if (c != null && c.trim().isNotEmpty) {
+        parts.add('« $c »');
+      }
+    }
+    return parts.join(' · ');
+  }
+
   Future<void> _refresh({bool silent = false}) async {
     if (!silent) {
       setState(() => loading = true);
@@ -261,14 +278,19 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
                         subtitle: Text('Active ton statut pour apparaitre aux clients.'),
                       ),
                     ),
-                  ...requests.map((r) {
+                  ...requests.map((raw) {
+                    final r = Map<String, dynamic>.from(raw as Map);
                     final status = r['status']?.toString() ?? '';
                     final canAct = status == 'pending';
                     final id = ApiService.parseIntId(r['id']);
+                    final extra = _mechanicRequestExtraLine(r);
                     return Card(
                       child: ListTile(
                         title: Text('${r['vehicle_type']} • $status'),
-                        subtitle: Text(r['description']?.toString() ?? ''),
+                        subtitle: Text(
+                          '${r['description']?.toString() ?? ''}${extra.isEmpty ? '' : '\n$extra'}',
+                        ),
+                        isThreeLine: true,
                         trailing: Wrap(
                           spacing: 8,
                           children: [

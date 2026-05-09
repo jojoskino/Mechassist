@@ -354,6 +354,151 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     await showInterventionChatDialog(context: context, authToken: token, requestId: requestId);
   }
 
+  bool _requestNeedsRating(Map<String, dynamic> r) {
+    if (r['status']?.toString() != 'completed') return false;
+    final rt = r['rating'];
+    if (rt == null) return true;
+    if (rt is Map && rt['stars'] == null) return true;
+    return false;
+  }
+
+  String _mechanicRatingLine(Map<String, dynamic> m) {
+    final avg = m['rating_avg'];
+    final cnt = m['rating_count'];
+    if (avg == null) return '';
+    final n = cnt is int ? cnt : (cnt is num ? cnt.toInt() : int.tryParse(cnt.toString()) ?? 0);
+    if (n <= 0) return '';
+    final a = avg is num ? avg.toDouble() : double.tryParse(avg.toString());
+    if (a == null) return '';
+    return ' · ${a.toStringAsFixed(1)}★ ($n avis)';
+  }
+
+  String _outcomeLabelFr(dynamic outcome) {
+    if (outcome == 'fixed') return 'Panne réglée';
+    if (outcome == 'not_fixed') return 'Panne non réglée';
+    return outcome?.toString() ?? '—';
+  }
+
+  String _requestStatusLine(Map<String, dynamic> r) {
+    switch (r['status']?.toString()) {
+      case 'pending':
+        return 'En attente de réponse';
+      case 'accepted':
+        return 'Acceptée — chat disponible';
+      case 'declined':
+        return 'Refusée';
+      case 'completed':
+        final o = _outcomeLabelFr(r['outcome']);
+        final rt = r['rating'];
+        final hasRating = rt is Map && rt['stars'] != null;
+        return 'Terminée ($o)${hasRating ? ' · ${rt['stars']}/5 ★' : ''}';
+      default:
+        return 'Statut : ${r['status']}';
+    }
+  }
+
+  Future<void> _promptCloseIntervention(int requestId) async {
+    final outcome = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clôturer l’intervention'),
+        content: const Text('La panne a-t-elle été réglée ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'not_fixed'), child: const Text('Non réglée')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'fixed'),
+            child: const Text('Oui, réglée'),
+          ),
+        ],
+      ),
+    );
+    if (outcome == null || !mounted) return;
+    final token = await AuthStorage.getToken();
+    if (token == null || !mounted) return;
+    final res = await ApiService.recordRequestOutcome(token, requestId, outcome);
+    if (!mounted) return;
+    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Intervention clôturée.' : (res['message']?.toString() ?? 'Erreur')),
+        backgroundColor: ok ? null : Colors.red.shade800,
+      ),
+    );
+    if (ok) await _refreshAll(silent: true, requireFreshGps: false);
+  }
+
+  Future<void> _promptRateMechanic(int requestId) async {
+    var stars = 5;
+    final commentCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: const Text('Noter le mécanicien'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Ton appréciation'),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) {
+                    final v = i + 1;
+                    return IconButton(
+                      onPressed: () => setSt(() => stars = v),
+                      icon: Icon(
+                        v <= stars ? Icons.star : Icons.star_border,
+                        size: 36,
+                        color: Colors.amber.shade700,
+                      ),
+                    );
+                  }),
+                ),
+                TextField(
+                  controller: commentCtrl,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    hintText: 'Commentaire (optionnel)',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Envoyer')),
+          ],
+        ),
+      ),
+    );
+    final commentText = commentCtrl.text;
+    commentCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+    final token = await AuthStorage.getToken();
+    if (token == null || !mounted) return;
+    final res = await ApiService.rateMechanicForRequest(
+      token,
+      requestId,
+      stars: stars,
+      comment: commentText.trim().isEmpty ? null : commentText.trim(),
+    );
+    if (!mounted) return;
+    final code = res['status'] as int?;
+    final ok = code != null && code >= 200 && code < 300;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Merci pour ta note !' : (res['message']?.toString() ?? 'Erreur')),
+        backgroundColor: ok ? null : Colors.red.shade800,
+      ),
+    );
+    if (ok) await _refreshAll(silent: true, requireFreshGps: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -457,7 +602,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
                     const SizedBox(height: 4),
                     Text(
                       '${m['distance_km']} km • ${m['phone'] ?? ''}'
-                      '${m['is_online'] == true ? ' · En ligne' : ''}',
+                      '${m['is_online'] == true ? ' · En ligne' : ''}'
+                      '${_mechanicRatingLine(m)}',
                     ),
                     const SizedBox(height: 10),
                     ElevatedButton(
@@ -509,6 +655,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
   void _showRequestDetail(Map<String, dynamic> r) {
     final id = ApiService.parseIntId(r['id']);
+    final rt = r['rating'];
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -522,7 +669,17 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
               const SizedBox(height: 8),
               Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
               const SizedBox(height: 8),
-              Text('Statut : ${r['status'] ?? '—'}'),
+              Text(_requestStatusLine(r)),
+              if (r['status']?.toString() == 'completed' && r['outcome'] != null) ...[
+                const SizedBox(height: 8),
+                Text('Résultat : ${_outcomeLabelFr(r['outcome'])}'),
+              ],
+              if (rt is Map && rt['stars'] != null) ...[
+                const SizedBox(height: 8),
+                Text('Ta note : ${rt['stars']}/5 ★'),
+                if (rt['comment'] != null && rt['comment'].toString().trim().isNotEmpty)
+                  Text('« ${rt['comment']} »', style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+              ],
               const SizedBox(height: 8),
               Text(r['description']?.toString() ?? ''),
             ],
@@ -530,13 +687,29 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
-          if (r['status']?.toString() == 'accepted' && id != null)
+          if (r['status']?.toString() == 'accepted' && id != null) ...[
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 _openChat(id);
               },
-              child: const Text('Ouvrir le chat'),
+              child: const Text('Chat'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _promptCloseIntervention(id);
+              },
+              child: const Text('Clôturer'),
+            ),
+          ],
+          if (id != null && _requestNeedsRating(r))
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _promptRateMechanic(id);
+              },
+              child: const Text('Noter'),
             ),
         ],
       ),
@@ -561,31 +734,33 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             ),
           ...requests.map((raw) {
             final r = Map<String, dynamic>.from(raw as Map);
+            final id = ApiService.parseIntId(r['id']);
             return Card(
               child: ListTile(
                 title: Text('${r['vehicle_type'] ?? '—'} • ${_mechanicNameFromRequest(r)}'),
                 subtitle: Text(
-                  '${r['description']?.toString() ?? ''}\n'
-                  '${switch (r['status']?.toString()) {
-                    'pending' => 'En attente de réponse',
-                    'accepted' => 'Acceptée — touche pour détails ou Chat',
-                    'declined' => 'Refusée',
-                    _ => 'Statut : ${r['status']}',
-                  }}',
+                  '${r['description']?.toString() ?? ''}\n${_requestStatusLine(r)}',
                 ),
                 isThreeLine: true,
                 onTap: () => _showRequestDetail(r),
-                trailing: r['status']?.toString() == 'accepted'
-                    ? TextButton(
-                        onPressed: () {
-                          final id = ApiService.parseIntId(r['id']);
-                          if (id != null) {
-                            _openChat(id);
-                          }
-                        },
+                trailing: Wrap(
+                  spacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (r['status']?.toString() == 'accepted' && id != null)
+                      TextButton(
+                        onPressed: () => _openChat(id),
                         child: const Text('Chat'),
-                      )
-                    : const Icon(Icons.chevron_right),
+                      ),
+                    if (_requestNeedsRating(r) && id != null)
+                      TextButton(
+                        onPressed: () => _promptRateMechanic(id),
+                        child: const Text('Noter'),
+                      ),
+                    if (r['status']?.toString() != 'accepted' && !_requestNeedsRating(r))
+                      const Icon(Icons.chevron_right),
+                  ],
+                ),
               ),
             );
           }),
