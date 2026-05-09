@@ -43,13 +43,50 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
   bool _sending = false;
   String? _loadError;
   String _myName = '';
+  bool _readOnly = false;
+  String? _accessHint;
 
   @override
   void initState() {
     super.initState();
     _loadCurrentIdentity();
-    _load();
+    _bootstrapAccess();
     _poll = Timer.periodic(const Duration(seconds: 3), (_) => _load(silent: true));
+  }
+
+  Future<void> _bootstrapAccess() async {
+    final res = await ApiService.getInterventionRequest(widget.authToken, widget.requestId);
+    if (!mounted) return;
+    final code = res['http_status'] as int?;
+    final httpOk = code != null && code >= 200 && code < 300;
+    if (!httpOk) {
+      setState(() {
+        _readOnly = true;
+        _accessHint = res['message']?.toString() ?? 'Impossible de charger la demande.';
+      });
+      await _load(silent: true);
+      return;
+    }
+    final wf = res['status']?.toString();
+    if (wf != null && wf != 'accepted') {
+      setState(() {
+        _readOnly = true;
+        switch (wf) {
+          case 'completed':
+            _accessHint = 'Intervention terminée — historique en lecture seule.';
+            break;
+          case 'pending':
+            _accessHint = 'En attente d’acceptation — le chat s’ouvre une fois la demande acceptée.';
+            break;
+          case 'declined':
+            _accessHint = 'Demande refusée — pas de nouveaux messages.';
+            break;
+          default:
+            _accessHint = 'Chat indisponible pour ce statut.';
+        }
+      });
+    }
+    await _load(silent: true);
   }
 
   Future<void> _loadCurrentIdentity() async {
@@ -90,7 +127,7 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
   }
 
   Future<void> _send() async {
-    if (_sending) return;
+    if (_readOnly || _sending) return;
     final body = _msgCtrl.text.trim();
     if (body.isEmpty) {
       if (!mounted) return;
@@ -139,6 +176,29 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_accessHint != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 20, color: Colors.blue.shade800),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _accessHint!,
+                            style: TextStyle(fontSize: 13, color: Colors.blue.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (_loadError != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -209,12 +269,15 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
             const SizedBox(height: 8),
             TextField(
               controller: _msgCtrl,
+              readOnly: _readOnly,
               minLines: 1,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'Message',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: _readOnly ? 'Lecture seule' : 'Message',
+                border: const OutlineInputBorder(),
                 isDense: true,
+                filled: _readOnly,
+                fillColor: _readOnly ? Colors.grey.shade100 : null,
               ),
             ),
           ],
@@ -224,7 +287,7 @@ class _InterventionChatDialogState extends State<_InterventionChatDialog> {
         TextButton(onPressed: () => _load(), child: const Text('Rafraîchir')),
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer')),
         ElevatedButton(
-          onPressed: _sending ? null : _send,
+          onPressed: (_sending || _readOnly) ? null : _send,
           child: _sending
               ? const SizedBox(
                   width: 16,

@@ -405,7 +405,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         content: const Text('La panne a-t-elle été réglée ?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, 'not_fixed'), child: const Text('Non réglée')),
-          FilledButton(
+          ElevatedButton(
             onPressed: () => Navigator.pop(ctx, 'fixed'),
             child: const Text('Oui, réglée'),
           ),
@@ -471,7 +471,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Envoyer')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Envoyer')),
           ],
         ),
       ),
@@ -716,6 +716,31 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     );
   }
 
+  /// Évite un `Wrap` vide (erreur de layout) quand aucune action rapide.
+  Widget? _buildRequestListTrailing(Map<String, dynamic> r, int? id) {
+    final showChat = r['status']?.toString() == 'accepted' && id != null;
+    final showRate = _requestNeedsRating(r) && id != null;
+    if (!showChat && !showRate) {
+      return const Icon(Icons.chevron_right);
+    }
+    return Wrap(
+      spacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (showChat)
+          TextButton(
+            onPressed: () => _openChat(id!),
+            child: const Text('Chat'),
+          ),
+        if (showRate)
+          TextButton(
+            onPressed: () => _promptRateMechanic(id!),
+            child: const Text('Noter'),
+          ),
+      ],
+    );
+  }
+
   Widget _buildRequestsTab() {
     return RefreshIndicator(
       onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
@@ -743,24 +768,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
                 ),
                 isThreeLine: true,
                 onTap: () => _showRequestDetail(r),
-                trailing: Wrap(
-                  spacing: 2,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (r['status']?.toString() == 'accepted' && id != null)
-                      TextButton(
-                        onPressed: () => _openChat(id),
-                        child: const Text('Chat'),
-                      ),
-                    if (_requestNeedsRating(r) && id != null)
-                      TextButton(
-                        onPressed: () => _promptRateMechanic(id),
-                        child: const Text('Noter'),
-                      ),
-                    if (r['status']?.toString() != 'accepted' && !_requestNeedsRating(r))
-                      const Icon(Icons.chevron_right),
-                  ],
-                ),
+                trailing: _buildRequestListTrailing(r, id),
               ),
             );
           }),

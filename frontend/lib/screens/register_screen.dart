@@ -234,7 +234,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                onPressed: () => Navigator.pushNamed(context, '/login'),
+                onPressed: () {
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.pop(context);
+                  } else {
+                    Navigator.pushReplacementNamed(context, '/login');
+                  }
+                },
                 child: const Text('Se connecter', style: TextStyle(fontWeight: FontWeight.w600)),
               ),
             ],

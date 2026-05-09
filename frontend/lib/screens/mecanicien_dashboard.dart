@@ -279,7 +279,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
                       ),
                     ),
                   ...requests.map((raw) {
-                    final r = Map<String, dynamic>.from(raw as Map);
+                    final r = raw is Map<String, dynamic>
+                        ? Map<String, dynamic>.from(raw)
+                        : Map<String, dynamic>.from(raw as Map);
                     final status = r['status']?.toString() ?? '';
                     final canAct = status == 'pending';
                     final id = ApiService.parseIntId(r['id']);

@@ -284,6 +284,40 @@ class ApiService {
     }
   }
 
+  /// Détail d’une demande : conserve le champ JSON `status` (workflow). Utiliser `http_status` pour le code HTTP.
+  static Future<Map<String, dynamic>> getInterventionRequest(String token, int id) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_apiRoot/requests/$id'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final code = response.statusCode;
+      final raw = response.body;
+      if (raw.isEmpty) {
+        return {'http_status': code, 'message': 'Réponse vide'};
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return {'http_status': code, 'message': 'Réponse invalide'};
+      }
+      if (code < 200 || code >= 300) {
+        return {
+          ...decoded,
+          'http_status': code,
+        };
+      }
+      return {
+        ...decoded,
+        'http_status': code,
+      };
+    } catch (e) {
+      return {'http_status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> updateMechanicAvailability(
     String token,
     bool isAvailable,
