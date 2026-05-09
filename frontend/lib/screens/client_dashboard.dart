@@ -729,12 +729,12 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       children: [
         if (showChat)
           TextButton(
-            onPressed: () => _openChat(id!),
+            onPressed: () => _openChat(id),
             child: const Text('Chat'),
           ),
         if (showRate)
           TextButton(
-            onPressed: () => _promptRateMechanic(id!),
+            onPressed: () => _promptRateMechanic(id),
             child: const Text('Noter'),
           ),
       ],
