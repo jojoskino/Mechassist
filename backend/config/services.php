@@ -45,4 +45,12 @@ return [
         'android_client_id' => env('GOOGLE_ANDROID_CLIENT_ID'),
     ],
 
+    /*
+    | Duplication vers Firestore (désactivée par défaut). Les écritures métier
+    | restent dans PostgreSQL ; n’active la sync que si tu en as besoin côté temps réel.
+    */
+    'firestore' => [
+        'sync_enabled' => env('FIRESTORE_SYNC_ENABLED', false),
+    ],
+
 ];

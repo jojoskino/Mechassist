@@ -1,12 +1,10 @@
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
 import '../services/google_sign_in_service.dart';
-import '../services/firebase_bootstrap.dart';
 import '../services/push_service.dart';
 import '../widgets/intervention_chat_dialog.dart';
 import '../widgets/mechanic_nearby_map.dart';
@@ -19,12 +17,8 @@ class DashboardClient extends StatefulWidget {
 }
 
 class _DashboardClientState extends State<DashboardClient> with WidgetsBindingObserver {
-  static const double _radiusKm = 30;
-
   List<dynamic> mechanics = [];
   List<Map<String, dynamic>> _apiMechanics = [];
-  List<Map<String, dynamic>> _firestoreMechanics = [];
-  QuerySnapshot<Map<String, dynamic>>? _lastPresenceSnapshot;
 
   List<dynamic> requests = [];
   bool loading = true;
@@ -38,7 +32,6 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   String currentRole = 'client';
   int _tabIndex = 0;
   Timer? _refreshTimer;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _presenceSub;
   StreamSubscription<Position>? _positionSub;
   DateTime? _lastLocationPost;
   String? lastError;
@@ -52,7 +45,6 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _refreshAll();
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshListsOnly());
     _syncPush();
-    _maybeStartPresenceListener();
     _startPositionTracking();
   }
 
@@ -84,112 +76,15 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }
   }
 
-  void _maybeStartPresenceListener() {
-    if (kIsWeb) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
-    if (!FirebaseBootstrap.initialized) return;
-    if (_presenceSub != null) return;
-    try {
-      _presenceSub = FirebaseFirestore.instance.collection('mechanic_presence').snapshots().listen(
-            _onPresenceSnapshot,
-            onError: (_) {},
-          );
-    } catch (_) {}
-  }
-
-  void _onPresenceSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
-    if (!mounted) return;
-    _lastPresenceSnapshot = snap;
-    if (lat != null && lng != null) {
-      _applyPresenceSnapshot(snap);
-      setState(() {});
-    }
-  }
-
-  Map<String, dynamic>? _mechanicFromFirestoreDoc(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
-    double clientLat,
-    double clientLng,
-  ) {
-    final data = doc.data();
-    if (data['is_available'] != true) return null;
-    final ml = (data['latitude'] as num?)?.toDouble();
-    final mg = (data['longitude'] as num?)?.toDouble();
-    if (ml == null || mg == null) return null;
-    final id = ApiService.parseIntId(data['laravel_id']) ?? int.tryParse(doc.id);
-    if (id == null) return null;
-    final km = Geolocator.distanceBetween(clientLat, clientLng, ml, mg) / 1000.0;
-    return {
-      'id': id,
-      'name': data['name']?.toString() ?? '-',
-      'phone': data['phone']?.toString() ?? '',
-      'latitude': ml,
-      'longitude': mg,
-      'is_available': true,
-      'distance_km': double.parse(km.toStringAsFixed(2)),
-    };
-  }
-
-  void _applyPresenceSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
-    final clat = lat;
-    final clng = lng;
-    if (clat == null || clng == null) return;
-    final list = <Map<String, dynamic>>[];
-    for (final d in snap.docs) {
-      final m = _mechanicFromFirestoreDoc(d, clat, clng);
-      if (m != null) list.add(m);
-    }
-    _firestoreMechanics = list;
-    _recomputeMergedMechanics();
-  }
-
-  /// Seuls les mécaniciens renvoyés par l’API peuvent recevoir une demande (règles serveur).
-  /// Firestore ne fait qu’affiner position / fraîcheur pour les IDs déjà autorisés par l’API.
+  /// Liste issue uniquement de l’API (PostgreSQL) — rafraîchie au pull, au timer et au GPS.
   void _recomputeMergedMechanics() {
-    if (lat == null || lng == null) {
-      mechanics = List<dynamic>.from(_apiMechanics);
-      return;
-    }
-    final clat = lat!;
-    final clng = lng!;
-    final byId = <int, Map<String, dynamic>>{};
-    for (final raw in _apiMechanics) {
-      final id = ApiService.parseIntId(raw['id']);
-      if (id != null) {
-        byId[id] = Map<String, dynamic>.from(raw);
-      }
-    }
-    for (final raw in _firestoreMechanics) {
-      final id = ApiService.parseIntId(raw['id']);
-      if (id == null || !byId.containsKey(id)) {
-        continue;
-      }
-      final base = Map<String, dynamic>.from(byId[id]!);
-      final ml = (raw['latitude'] as num?)?.toDouble();
-      final mg = (raw['longitude'] as num?)?.toDouble();
-      if (ml != null && mg != null) {
-        base['latitude'] = ml;
-        base['longitude'] = mg;
-        final km = Geolocator.distanceBetween(clat, clng, ml, mg) / 1000.0;
-        base['distance_km'] = double.parse(km.toStringAsFixed(2));
-      }
-      byId[id] = base;
-    }
-    final merged = byId.values.where((m) {
-      final d = (m['distance_km'] as num?)?.toDouble();
-      return d != null && d <= _radiusKm;
-    }).toList()
-      ..sort(
-        (a, b) => ((a['distance_km'] as num).toDouble()).compareTo((b['distance_km'] as num).toDouble()),
-      );
-    mechanics = merged;
+    mechanics = List<dynamic>.from(_apiMechanics);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
-    _presenceSub?.cancel();
     _positionSub?.cancel();
     super.dispose();
   }
@@ -247,12 +142,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           errorMsg ??=
               nearby['message']?.toString() ?? 'Impossible de charger les mécaniciens (code ${nearby['status']}).';
         }
-        if (_lastPresenceSnapshot != null) {
-          _applyPresenceSnapshot(_lastPresenceSnapshot!);
-        } else {
-          _recomputeMergedMechanics();
-        }
-        _maybeStartPresenceListener();
+        _recomputeMergedMechanics();
       } else {
         _apiMechanics = [];
         _recomputeMergedMechanics();
@@ -307,11 +197,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             }
           });
         }
-        if (_lastPresenceSnapshot != null) {
-          _applyPresenceSnapshot(_lastPresenceSnapshot!);
-        } else {
-          _recomputeMergedMechanics();
-        }
+        _recomputeMergedMechanics();
         if (mounted) {
           setState(() {});
         }

@@ -11,13 +11,17 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Duplique les données vers Cloud Firestore (API REST, sans ext-grpc).
- * PostgreSQL reste la source de vérité ; si Firestore n’est pas configuré ou échoue, l’API reste fonctionnelle.
+ * Duplique les données vers Cloud Firestore (API REST, sans ext-grpc), optionnellement.
+ * PostgreSQL est la source de vérité ; sans FIRESTORE_SYNC_ENABLED=true, rien n’est envoyé à Firestore.
  */
 class FirestoreSyncService
 {
     public function enabled(): bool
     {
+        if (! filter_var(config('services.firestore.sync_enabled'), FILTER_VALIDATE_BOOLEAN)) {
+            return false;
+        }
+
         $path = env('GOOGLE_APPLICATION_CREDENTIALS');
         $project = env('FIREBASE_PROJECT_ID');
 
