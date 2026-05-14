@@ -7,6 +7,7 @@ use App\Models\InterventionRequest;
 use App\Services\FcmService;
 use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ChatMessageController extends Controller
 {
@@ -33,31 +34,64 @@ class ChatMessageController extends Controller
     public function store(Request $request, int $id)
     {
         $row = InterventionRequest::query()->findOrFail($id);
+        $row->loadMissing(['client', 'mechanic']);
         $this->authorizeParticipant($request->user()->id, $row);
 
         if ($row->status !== 'accepted') {
             return response()->json(['message' => 'Chat indisponible pour cette demande.'], 422);
         }
 
-        $validated = $request->validate([
-            'body' => 'required|string|max:2000',
-        ]);
+        if ($request->hasFile('media')) {
+            $validated = $request->validate([
+                'message_type' => ['required', Rule::in(['image', 'audio'])],
+                'body' => 'nullable|string|max:2000',
+            ]);
+            $mimeRule = $validated['message_type'] === 'image'
+                ? 'mimes:jpeg,jpg,png,webp,gif'
+                : 'mimes:mp3,m4a,wav,webm,ogg,aac,mpeg,mp4,x-m4a,octet-stream';
+            $request->validate([
+                'media' => ['required', 'file', 'max:20480', $mimeRule],
+            ]);
 
-        $message = ChatMessage::query()->create([
-            'intervention_request_id' => $row->id,
-            'user_id' => $request->user()->id,
-            'body' => $validated['body'],
-        ])->load('user:id,name,role');
+            $type = $validated['message_type'];
+            $path = $request->file('media')->store('chat/'.$row->id, 'public');
+            $caption = isset($validated['body']) ? trim((string) $validated['body']) : '';
+
+            $message = ChatMessage::query()->create([
+                'intervention_request_id' => $row->id,
+                'user_id' => $request->user()->id,
+                'kind' => $type,
+                'body' => $caption,
+                'media_path' => $path,
+            ])->load('user:id,name,role');
+        } else {
+            $validated = $request->validate([
+                'body' => 'required|string|max:2000',
+            ]);
+
+            $message = ChatMessage::query()->create([
+                'intervention_request_id' => $row->id,
+                'user_id' => $request->user()->id,
+                'kind' => 'text',
+                'body' => $validated['body'],
+                'media_path' => null,
+            ])->load('user:id,name,role');
+        }
 
         $target = $request->user()->id === $row->client_id
             ? $row->mechanic
             : $row->client;
         $senderName = $request->user()->name ?? 'Utilisateur';
+        $preview = match ($message->kind) {
+            'image' => '📷 Photo',
+            'audio' => '🎤 Message vocal',
+            default => mb_substr((string) $message->body, 0, 120),
+        };
 
         $this->fcmService->sendToToken(
             $target?->fcm_token,
             'Nouveau message',
-            $senderName.': '.$validated['body'],
+            $senderName.': '.$preview,
             ['type' => 'chat_message', 'request_id' => (string) $row->id]
         );
 

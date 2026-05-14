@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -20,22 +21,28 @@ class AuthController extends Controller
             'password' => 'required|string|min:6|confirmed',
             'role'     => 'required|in:client,mecanicien',
             'fcm_token' => 'nullable|string|max:4096',
+            'mechanic_specialty' => 'nullable|string|max:255',
         ]);
 
         $isMechanic = $validated['role'] === 'mecanicien';
 
-        $user = User::create([
-            'name'     => $validated['name'],
-            'email'    => $validated['email'],
-            'phone'    => $validated['phone'],
-            'password' => Hash::make($validated['password']),
-            'role'     => $validated['role'],
-            'is_available' => $isMechanic,
-            'last_seen_at' => $isMechanic ? now() : null,
-            'fcm_token' => $validated['fcm_token'] ?? null,
-        ]);
+        [$user, $token] = DB::transaction(function () use ($validated, $isMechanic) {
+            $user = User::query()->create([
+                'name'     => $validated['name'],
+                'email'    => $validated['email'],
+                'phone'    => $validated['phone'],
+                'password' => Hash::make($validated['password']),
+                'role'     => $validated['role'],
+                'is_available' => $isMechanic,
+                'last_seen_at' => $isMechanic ? now() : null,
+                'fcm_token' => $validated['fcm_token'] ?? null,
+                'mechanic_specialty' => $isMechanic ? ($validated['mechanic_specialty'] ?? null) : null,
+            ]);
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+            $token = $user->createToken('auth_token')->plainTextToken;
+
+            return [$user, $token];
+        });
 
         $fresh = $user->fresh();
         if ($isMechanic) {
@@ -159,16 +166,18 @@ class AuthController extends Controller
                 $role = 'client';
             }
             $isMechanic = $role === 'mecanicien';
-            $user = User::create([
-                'name' => $name,
-                'email' => $email,
-                'phone' => null,
-                'password' => Hash::make(Str::random(48)),
-                'role' => $role,
-                'is_available' => $isMechanic,
-                'last_seen_at' => $isMechanic ? now() : null,
-                'fcm_token' => $validated['fcm_token'] ?? null,
-            ]);
+            $user = DB::transaction(function () use ($name, $email, $role, $isMechanic, $validated) {
+                return User::query()->create([
+                    'name' => $name,
+                    'email' => $email,
+                    'phone' => null,
+                    'password' => Hash::make(Str::random(48)),
+                    'role' => $role,
+                    'is_available' => $isMechanic,
+                    'last_seen_at' => $isMechanic ? now() : null,
+                    'fcm_token' => $validated['fcm_token'] ?? null,
+                ]);
+            });
         } else {
             if ($name !== '' && $user->name !== $name) {
                 $user->name = $name;

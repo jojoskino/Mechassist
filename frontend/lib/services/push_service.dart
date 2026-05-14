@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'api_service.dart';
 import 'auth_storage.dart';
 import 'firebase_bootstrap.dart';
+import 'notification_navigation.dart';
 
 /// FCM sur Android : permission, token, notifications en premier plan (canal local).
 class PushService {
@@ -40,9 +41,7 @@ class PushService {
   }
 
   static void _onNotificationTap(NotificationResponse response) {
-    if (kDebugMode && response.payload != null) {
-      debugPrint('Notification tap payload: ${response.payload}');
-    }
+    NotificationNavigation.handlePayloadString(response.payload);
   }
 
   static Future<void> _bindListenersOnce() async {

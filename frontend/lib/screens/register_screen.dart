@@ -19,6 +19,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final phoneCtrl = TextEditingController();
   final passwordCtrl = TextEditingController();
   final passwordConfirmCtrl = TextEditingController();
+  final specialtyCtrl = TextEditingController();
   String role = 'client';
   bool isLoading = false;
   bool obscure = true;
@@ -34,7 +35,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     phoneCtrl.dispose();
     passwordCtrl.dispose();
     passwordConfirmCtrl.dispose();
+    specialtyCtrl.dispose();
     super.dispose();
+  }
+
+  /// FCM peut prendre plusieurs secondes : ne bloque pas l’auth ; le tableau de bord rappelle aussi `updatePushToken`.
+  void _syncPushTokenInBackground(String apiToken) {
+    Future<void>.microtask(() async {
+      try {
+        final fcm = await PushService.initAndGetToken();
+        if (fcm != null && fcm.isNotEmpty) {
+          await ApiService.updatePushToken(apiToken, fcm);
+        }
+      } catch (_) {}
+    });
   }
 
   Future<void> _googleRegister() async {
@@ -46,25 +60,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
         setState(() => isLoading = false);
         return;
       }
-      final fcmToken = await PushService.initAndGetToken();
-      final res = await ApiService.googleLogin(idToken: idToken, role: role, fcmToken: fcmToken);
+      final res = await ApiService.googleLogin(idToken: idToken, role: role, fcmToken: null);
       if (!mounted) return;
       setState(() => isLoading = false);
 
       if (res['status'] == 200 && res['token'] != null) {
         final user = res['user'] as Map<String, dynamic>? ?? {};
+        final apiToken = res['token'].toString();
         await AuthStorage.save(
-          token: res['token'].toString(),
+          token: apiToken,
           role: user['role']?.toString() ?? role,
           name: user['name']?.toString() ?? '',
         );
-        await ApiService.updatePushToken(res['token'].toString(), fcmToken);
         if (!mounted) return;
         _showSnack('Compte Google relié avec succès');
         Navigator.pushReplacementNamed(
           context,
           (user['role']?.toString() ?? role) == 'mecanicien' ? '/mecanicien' : '/client',
         );
+        _syncPushTokenInBackground(apiToken);
       } else {
         final msg = res['message']?.toString() ?? 'Inscription Google impossible';
         _showSnack(msg, isError: true);
@@ -90,7 +104,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
     setState(() => isLoading = true);
-    final fcmToken = await PushService.initAndGetToken();
     final res = await ApiService.register(
       nameCtrl.text.trim(),
       emailCtrl.text.trim(),
@@ -98,25 +111,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
       passwordCtrl.text,
       passwordConfirmCtrl.text,
       role,
-      fcmToken,
+      null,
+      mechanicSpecialty: role == 'mecanicien' ? specialtyCtrl.text.trim() : null,
     );
     if (!mounted) return;
     setState(() => isLoading = false);
 
     if (res['status'] == 201 && res['token'] != null) {
       final user = res['user'] as Map<String, dynamic>? ?? {};
+      final apiToken = res['token'].toString();
       await AuthStorage.save(
-        token: res['token'].toString(),
+        token: apiToken,
         role: user['role']?.toString() ?? role,
         name: user['name']?.toString() ?? nameCtrl.text.trim(),
       );
-      await ApiService.updatePushToken(res['token'].toString(), fcmToken);
       if (!mounted) return;
       _showSnack('Compte créé avec succès');
       Navigator.pushReplacementNamed(
         context,
         (user['role']?.toString() ?? role) == 'mecanicien' ? '/mecanicien' : '/client',
       );
+      _syncPushTokenInBackground(apiToken);
     } else {
       final errors = res['errors'];
       var msg = res['message']?.toString() ?? 'Erreur inconnue';
@@ -196,6 +211,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
               prefixIcon: Icon(Icons.badge_outlined, color: Colors.black45),
             ),
           ),
+          if (role == 'mecanicien') ...[
+            const SizedBox(height: 16),
+            _buildField(
+              specialtyCtrl,
+              Icons.build_outlined,
+              hint: 'Spécialités (ex. moteur, batterie…)',
+            ),
+          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,

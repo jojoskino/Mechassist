@@ -17,7 +17,9 @@ class InterventionRequest extends Model
         'photo_path',
         'client_lat',
         'client_lng',
+        'client_address',
         'status',
+        'mechanic_completed_at',
         'outcome',
         'outcome_at',
     ];
@@ -28,6 +30,7 @@ class InterventionRequest extends Model
             'client_lat' => 'float',
             'client_lng' => 'float',
             'outcome_at' => 'datetime',
+            'mechanic_completed_at' => 'datetime',
         ];
     }
 

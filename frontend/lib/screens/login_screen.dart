@@ -80,6 +80,17 @@ class _LoginScreenState extends State<LoginScreen> {
     await prefs.setString('mechassist_saved_email', em);
   }
 
+  void _syncPushTokenInBackground(String apiToken) {
+    Future<void>.microtask(() async {
+      try {
+        final fcm = await PushService.initAndGetToken();
+        if (fcm != null && fcm.isNotEmpty) {
+          await ApiService.updatePushToken(apiToken, fcm);
+        }
+      } catch (_) {}
+    });
+  }
+
   Future<void> _googleLogin() async {
     setState(() => isLoading = true);
     try {
@@ -89,22 +100,22 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => isLoading = false);
         return;
       }
-      final fcmToken = await PushService.initAndGetToken();
-      final res = await ApiService.googleLogin(idToken: idToken, fcmToken: fcmToken);
+      final res = await ApiService.googleLogin(idToken: idToken, fcmToken: null);
       if (!mounted) return;
       setState(() => isLoading = false);
 
       if (res['status'] == 200 && res['token'] != null) {
         final user = res['user'] as Map<String, dynamic>? ?? {};
+        final apiToken = res['token'].toString();
         await _persistRememberEmailFromUser(user);
         await AuthStorage.save(
-          token: res['token'].toString(),
+          token: apiToken,
           role: user['role']?.toString() ?? 'client',
           name: user['name']?.toString() ?? '',
         );
-        await ApiService.updatePushToken(res['token'].toString(), fcmToken);
         if (!mounted) return;
         _navigateByRole(user['role']?.toString() ?? 'client');
+        _syncPushTokenInBackground(apiToken);
       } else {
         _showSnack(res['message']?.toString() ?? 'Connexion Google impossible', isError: true);
       }
@@ -121,22 +132,22 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => isLoading = true);
-    final fcmToken = await PushService.initAndGetToken();
-    final res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, fcmToken);
+    final res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     if (!mounted) return;
     setState(() => isLoading = false);
 
     if (res['status'] == 200 && res['token'] != null) {
       final user = res['user'] as Map<String, dynamic>? ?? {};
+      final apiToken = res['token'].toString();
       await _persistRemember();
       await AuthStorage.save(
-        token: res['token'].toString(),
+        token: apiToken,
         role: user['role']?.toString() ?? 'client',
         name: user['name']?.toString() ?? '',
       );
-      await ApiService.updatePushToken(res['token'].toString(), fcmToken);
       if (!mounted) return;
       _navigateByRole(user['role']?.toString() ?? 'client');
+      _syncPushTokenInBackground(apiToken);
     } else {
       _showSnack(res['message']?.toString() ?? 'Identifiants incorrects', isError: true);
     }
@@ -182,7 +193,21 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: () => setState(() => obscure = !obscure),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: linkOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => Navigator.pushNamed(context, '/forgot-password'),
+              child: const Text('Mot de passe oublié ?', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [

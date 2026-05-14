@@ -2,8 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthStorage {
   static const _tokenKey = 'auth_token';
-  static const _roleKey  = 'user_role';
-  static const _nameKey  = 'user_name';
+  static const _roleKey = 'user_role';
+  static const _nameKey = 'user_name';
 
   static Future<void> save({
     required String token,
@@ -31,6 +31,11 @@ class AuthStorage {
     return prefs.getString(_nameKey);
   }
 
+  static Future<void> updateName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_nameKey, name);
+  }
+
   static Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
@@ -41,5 +46,15 @@ class AuthStorage {
   static Future<bool> isLoggedIn() async {
     final token = await getToken();
     return token != null && token.isNotEmpty;
+  }
+
+  /// Une seule ouverture SharedPreferences (plus rapide que trois appels séparés).
+  static Future<Map<String, String?>> getSessionFields() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'token': prefs.getString(_tokenKey),
+      'role': prefs.getString(_roleKey),
+      'name': prefs.getString(_nameKey),
+    };
   }
 }

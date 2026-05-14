@@ -20,37 +20,38 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    await Future.delayed(const Duration(milliseconds: 1400));
+    await Future<void>.delayed(const Duration(milliseconds: 350));
     if (!mounted) return;
-    final isLogged = await AuthStorage.isLoggedIn();
-    if (!mounted) return;
+    final session = await AuthStorage.getSessionFields();
+    final token = session['token'];
+    if (token == null || token.isEmpty) {
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/welcome');
+      return;
+    }
 
-    if (isLogged) {
-      final token = await AuthStorage.getToken();
-      if (token != null) {
-        final me = await ApiService.getMe(token);
-        final ok = (me['status'] as int?) != null && (me['status'] as int) >= 200 && (me['status'] as int) < 300;
-        if (!ok) {
-          await AuthStorage.clear();
-          if (!mounted) return;
-          Navigator.pushReplacementNamed(context, '/welcome');
-          return;
-        }
+    final me = await ApiService.getMe(token);
+    final ok = (me['status'] as int?) != null && (me['status'] as int) >= 200 && (me['status'] as int) < 300;
+    if (!ok) {
+      await AuthStorage.clear();
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/welcome');
+      return;
+    }
+    final role = session['role'] ?? 'client';
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(
+      context,
+      role == 'mecanicien' ? '/mecanicien' : '/client',
+    );
+    Future<void>.microtask(() async {
+      try {
         final fcm = await PushService.initAndGetToken();
         if (fcm != null && fcm.isNotEmpty) {
           await ApiService.updatePushToken(token, fcm);
         }
-      }
-      final role = await AuthStorage.getRole();
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(
-        context,
-        role == 'mecanicien' ? '/mecanicien' : '/client',
-      );
-    } else {
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/welcome');
-    }
+      } catch (_) {}
+    });
   }
 
   @override

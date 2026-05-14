@@ -26,7 +26,7 @@ class InterventionRequestController extends Controller
         }
 
         $validated = $request->validate([
-            'status' => 'sometimes|in:pending,accepted,declined,completed',
+            'status' => 'sometimes|in:pending,accepted,declined,completed,cancelled',
         ]);
 
         $q = InterventionRequest::query()->with([
@@ -62,6 +62,7 @@ class InterventionRequestController extends Controller
             'description' => 'required|string|max:5000',
             'client_lat' => 'required|numeric|between:-90,90',
             'client_lng' => 'required|numeric|between:-180,180',
+            'client_address' => 'nullable|string|max:500',
             'photo' => 'nullable|image|max:5120',
         ]);
 
@@ -95,6 +96,7 @@ class InterventionRequestController extends Controller
             'photo_path' => $photoPath,
             'client_lat' => $validated['client_lat'],
             'client_lng' => $validated['client_lng'],
+            'client_address' => isset($validated['client_address']) ? trim((string) $validated['client_address']) ?: null : null,
             'status' => 'pending',
         ]);
 
@@ -139,6 +141,9 @@ class InterventionRequestController extends Controller
         }
         if ($row->status !== 'accepted') {
             return response()->json(['message' => 'Cette demande n’est pas en cours (acceptée).'], 422);
+        }
+        if ($row->mechanic_completed_at === null) {
+            return response()->json(['message' => 'Le mécanicien doit d’abord marquer l’intervention comme terminée.'], 422);
         }
 
         $validated = $request->validate([
@@ -209,6 +214,43 @@ class InterventionRequestController extends Controller
         return response()->json($this->transform($fresh), 201);
     }
 
+    /**
+     * Le mécanicien indique que l’intervention sur place est terminée ; le client est notifié pour clôturer / noter.
+     */
+    public function markMechanicComplete(Request $request, int $id)
+    {
+        $user = $request->user();
+        if ($user->role !== 'mecanicien') {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
+        $row = InterventionRequest::query()->findOrFail($id);
+        if ($row->mechanic_id !== $user->id) {
+            return response()->json(['message' => 'Cette demande ne vous est pas adressée.'], 403);
+        }
+        if ($row->status !== 'accepted') {
+            return response()->json(['message' => 'Seule une demande acceptée peut être marquée terminée par le mécanicien.'], 422);
+        }
+        if ($row->mechanic_completed_at !== null) {
+            return response()->json(['message' => 'Intervention déjà marquée comme terminée.'], 409);
+        }
+
+        $row->mechanic_completed_at = now();
+        $row->save();
+        $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
+
+        $this->fcmService->sendToToken(
+            $row->client?->fcm_token,
+            'Intervention terminée',
+            'Le mécanicien a indiqué que l’intervention est terminée. Indique si la panne est réglée.',
+            ['type' => 'mechanic_marked_complete', 'request_id' => (string) $row->id]
+        );
+
+        $this->firestoreSync->syncInterventionRequest($row->fresh());
+
+        return response()->json($this->transform($row->fresh()));
+    }
+
     public function accept(Request $request, int $id)
     {
         $user = $request->user();
@@ -269,6 +311,39 @@ class InterventionRequestController extends Controller
         $this->firestoreSync->syncInterventionRequest($row->fresh());
 
         return response()->json($this->transform($row));
+    }
+
+    /**
+     * Annulation par le client tant que la demande est encore en attente de réponse du mécanicien.
+     */
+    public function cancel(Request $request, int $id)
+    {
+        if ($request->user()->role !== 'client') {
+            return response()->json(['message' => 'Seuls les clients peuvent annuler une demande.'], 403);
+        }
+
+        $row = InterventionRequest::query()->findOrFail($id);
+        if ($row->client_id !== $request->user()->id) {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+        if ($row->status !== 'pending') {
+            return response()->json(['message' => 'Seule une demande en attente peut être annulée.'], 422);
+        }
+
+        $row->status = 'cancelled';
+        $row->save();
+        $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
+
+        $this->fcmService->sendToToken(
+            $row->mechanic?->fcm_token,
+            'Demande annulée',
+            'Le client a annulé sa demande.',
+            ['type' => 'request_cancelled', 'request_id' => (string) $row->id]
+        );
+
+        $this->firestoreSync->syncInterventionRequest($row->fresh());
+
+        return response()->json($this->transform($row->fresh()));
     }
 
     private function authorizeParticipant(int $userId, InterventionRequest $row): void

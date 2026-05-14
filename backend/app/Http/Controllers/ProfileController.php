@@ -21,6 +21,7 @@ class ProfileController extends Controller
         ];
         if ($user->role === 'mecanicien') {
             $rules['is_available'] = 'sometimes|boolean';
+            $rules['mechanic_specialty'] = 'sometimes|nullable|string|max:255';
         }
 
         $validated = $request->validate($rules);

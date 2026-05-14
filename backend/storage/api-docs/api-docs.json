@@ -1,0 +1,1096 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "MechAssist API",
+        "description": "API REST : clients, mécaniciens, demandes d’intervention, chat, géolocalisation, notes. Auth : Laravel Sanctum (Bearer token).",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/api/register": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Documentation OpenAPI 3 — générée pour Swagger UI (L5-Swagger).\r\nLes chemins correspondent au préfixe `/api` des routes Laravel.",
+                "description": "Crée un compte client ou mécanicien.",
+                "operationId": "register",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "email",
+                                    "phone",
+                                    "password",
+                                    "password_confirmation",
+                                    "role"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "phone": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password"
+                                    },
+                                    "password_confirmation": {
+                                        "type": "string",
+                                        "format": "password"
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "enum": [
+                                            "client",
+                                            "mecanicien"
+                                        ]
+                                    },
+                                    "fcm_token": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "mechanic_specialty": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Compte créé + token"
+                    },
+                    "422": {
+                        "description": "Validation"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/login": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "operationId": "login",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password"
+                                    },
+                                    "fcm_token": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK + token"
+                    },
+                    "401": {
+                        "description": "Identifiants incorrects"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/auth/google": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "operationId": "googleLogin",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "id_token"
+                                ],
+                                "properties": {
+                                    "id_token": {
+                                        "type": "string"
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "client",
+                                            "mecanicien"
+                                        ]
+                                    },
+                                    "fcm_token": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK + token"
+                    },
+                    "401": {
+                        "description": "Jeton Google invalide"
+                    },
+                    "503": {
+                        "description": "Google non configuré"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/forgot-password": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "description": "Envoie un e-mail avec le lien / token de réinitialisation (MAIL_* requis).",
+                "operationId": "forgotPassword",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "E-mail envoyé"
+                    },
+                    "422": {
+                        "description": "E-mail inconnu ou throttling"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/reset-password": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "operationId": "resetPassword",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "token",
+                                    "password",
+                                    "password_confirmation"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "token": {
+                                        "type": "string"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password"
+                                    },
+                                    "password_confirmation": {
+                                        "type": "string",
+                                        "format": "password"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Mot de passe mis à jour"
+                    },
+                    "422": {
+                        "description": "Jeton invalide ou expiré"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/client-config": {
+            "get": {
+                "tags": [
+                    "Public"
+                ],
+                "operationId": "clientConfig",
+                "responses": {
+                    "200": {
+                        "description": "google_client_id, google_maps_web_api_key"
+                    }
+                },
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/logout": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "operationId": "logout",
+                "responses": {
+                    "200": {
+                        "description": "Déconnecté"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/me": {
+            "get": {
+                "tags": [
+                    "Profil"
+                ],
+                "operationId": "me",
+                "responses": {
+                    "200": {
+                        "description": "Utilisateur courant"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/profile": {
+            "get": {
+                "tags": [
+                    "Profil"
+                ],
+                "operationId": "profileShow",
+                "responses": {
+                    "200": {
+                        "description": "Profil"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Profil"
+                ],
+                "operationId": "profileUpdate",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "phone": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "is_available": {
+                                        "type": "boolean",
+                                        "nullable": true
+                                    },
+                                    "mechanic_specialty": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Mis à jour"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/location": {
+            "post": {
+                "tags": [
+                    "Géolocalisation"
+                ],
+                "operationId": "locationUpdate",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "latitude",
+                                    "longitude"
+                                ],
+                                "properties": {
+                                    "latitude": {
+                                        "type": "number",
+                                        "format": "float"
+                                    },
+                                    "longitude": {
+                                        "type": "number",
+                                        "format": "float"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Position enregistrée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/presence/touch": {
+            "post": {
+                "tags": [
+                    "Géolocalisation"
+                ],
+                "operationId": "presenceTouch",
+                "responses": {
+                    "200": {
+                        "description": "Présence mécano"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/mechanics/nearby": {
+            "get": {
+                "tags": [
+                    "Géolocalisation"
+                ],
+                "operationId": "mechanicsNearby",
+                "parameters": [
+                    {
+                        "name": "latitude",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "longitude",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "radius_km",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "min_rating",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "specialty",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Liste JSON mécaniciens"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests": {
+            "get": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsIndex",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "accepted",
+                                "declined",
+                                "completed"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Liste des demandes"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "description": "Accepte `application/json` ou `multipart/form-data` (champs identiques + fichier optionnel `photo`).",
+                "operationId": "requestsStore",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "mechanic_id",
+                                    "vehicle_type",
+                                    "description",
+                                    "client_lat",
+                                    "client_lng"
+                                ],
+                                "properties": {
+                                    "mechanic_id": {
+                                        "type": "integer"
+                                    },
+                                    "vehicle_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "moto",
+                                            "voiture",
+                                            "autre"
+                                        ]
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    },
+                                    "client_lat": {
+                                        "type": "number"
+                                    },
+                                    "client_lng": {
+                                        "type": "number"
+                                    },
+                                    "client_address": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Demande créée"
+                    },
+                    "422": {
+                        "description": "Validation"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}": {
+            "get": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsShow",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Détail demande"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/accept": {
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsAccept",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Acceptée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/decline": {
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsDecline",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Refusée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/mechanic-complete": {
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsMechanicComplete",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Mécanicien a marqué l’intervention terminée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/outcome": {
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "description": "Après que le mécanicien a appelé POST /api/requests/{id}/mechanic-complete.",
+                "operationId": "requestsOutcome",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "outcome"
+                                ],
+                                "properties": {
+                                    "outcome": {
+                                        "type": "string",
+                                        "enum": [
+                                            "fixed",
+                                            "not_fixed"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Clôturée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/rating": {
+            "post": {
+                "tags": [
+                    "Demandes"
+                ],
+                "operationId": "requestsRating",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "stars"
+                                ],
+                                "properties": {
+                                    "stars": {
+                                        "type": "integer",
+                                        "maximum": 5,
+                                        "minimum": 1
+                                    },
+                                    "comment": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Note enregistrée"
+                    },
+                    "409": {
+                        "description": "Déjà noté"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/requests/{id}/messages": {
+            "get": {
+                "tags": [
+                    "Chat"
+                ],
+                "operationId": "messagesIndex",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Liste messages"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Chat"
+                ],
+                "operationId": "messagesStore",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "body"
+                                ],
+                                "properties": {
+                                    "body": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Message créé"
+                    },
+                    "422": {
+                        "description": "Demande non acceptée"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        },
+        "/api/push/token": {
+            "post": {
+                "tags": [
+                    "Push"
+                ],
+                "operationId": "pushToken",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "fcm_token": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ],
+                "servers": [
+                    {
+                        "url": "/",
+                        "description": "Serveur d’exécution (ex. http://127.0.0.1:8000)"
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "sanctum": {
+                "type": "http",
+                "description": "Token Sanctum : Authorization: Bearer {token}",
+                "scheme": "bearer",
+                "bearerFormat": "opaque"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Auth",
+            "description": "Inscription, connexion, mot de passe, Google"
+        },
+        {
+            "name": "Public",
+            "description": "Configuration exposée au client"
+        },
+        {
+            "name": "Profil",
+            "description": "Profil et disponibilité (Bearer)"
+        },
+        {
+            "name": "Géolocalisation",
+            "description": "Position et recherche (Bearer)"
+        },
+        {
+            "name": "Demandes",
+            "description": "Interventions (Bearer)"
+        },
+        {
+            "name": "Chat",
+            "description": "Messages (Bearer)"
+        },
+        {
+            "name": "Push",
+            "description": "FCM (Bearer)"
+        }
+    ]
+}

@@ -232,14 +232,27 @@ class FirestoreSyncService
 
             $docId = 'laravel_msg_'.$message->id;
             $parentPath = 'chats/request_'.$requestId;
+            $kind = (string) ($message->kind ?? 'text');
+            $preview = match ($kind) {
+                'image' => '📷 Photo',
+                'audio' => '🎤 Message vocal',
+                default => (string) $message->body,
+            };
             $fields = [
-                'text' => ['stringValue' => (string) $message->body],
+                'text' => ['stringValue' => $preview],
+                'kind' => ['stringValue' => $kind],
                 'userId' => ['integerValue' => (string) $sender->id],
                 'userName' => ['stringValue' => (string) $sender->name],
                 'role' => ['stringValue' => (string) $sender->role],
                 'laravel_message_id' => ['integerValue' => (string) $message->id],
                 'createdAt' => $this->timestampValue($message->created_at ?? new \DateTimeImmutable),
             ];
+            $mediaUrl = $message->media_url ?? null;
+            if (is_string($mediaUrl) && $mediaUrl !== '') {
+                $fields['mediaUrl'] = ['stringValue' => $mediaUrl];
+            } else {
+                $fields['mediaUrl'] = ['nullValue' => null];
+            }
             $this->createChildDocument($parentPath, 'messages', $docId, $fields);
         } catch (\Throwable $e) {
             Log::warning('FirestoreSync: message', ['message' => $e->getMessage()]);

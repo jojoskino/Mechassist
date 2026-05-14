@@ -14,9 +14,14 @@ class MechanicSearchController extends Controller
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'radius_km' => 'sometimes|numeric|min:1|max:500',
+            'min_rating' => 'sometimes|numeric|min:0|max:5',
+            'specialty' => 'sometimes|string|max:255',
         ]);
 
-        $radius = (float) ($validated['radius_km'] ?? 50);
+        // Cahier d’analyse : rayon type 5 km (défaut) ; max 500 pour zones peu denses.
+        $radius = (float) ($validated['radius_km'] ?? 5);
+        $minRating = isset($validated['min_rating']) ? (float) $validated['min_rating'] : null;
+        $specialty = isset($validated['specialty']) ? trim((string) $validated['specialty']) : '';
         $lat = (float) $validated['latitude'];
         $lng = (float) $validated['longitude'];
 
@@ -25,6 +30,10 @@ class MechanicSearchController extends Controller
         $mechanics = User::query()
             ->where('role', 'mecanicien')
             ->where('is_available', true)
+            ->when($specialty !== '', function ($q) use ($specialty) {
+                $needle = '%'.mb_strtolower($specialty).'%';
+                $q->whereRaw("LOWER(COALESCE(mechanic_specialty, '')) LIKE ?", [$needle]);
+            })
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
             ->where(function ($q) use ($onlineBefore) {
@@ -37,7 +46,7 @@ class MechanicSearchController extends Controller
                         ->where('last_location_at', '>=', $onlineBefore);
                 });
             })
-            ->get(['id', 'name', 'phone', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at']);
+            ->get(['id', 'name', 'phone', 'mechanic_specialty', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at']);
 
         $withDistance = $mechanics->map(function (User $u) use ($lat, $lng, $onlineBefore) {
             $km = self::haversineKm($lat, $lng, (float) $u->latitude, (float) $u->longitude);
@@ -64,6 +73,14 @@ class MechanicSearchController extends Controller
                 $u->setAttribute('rating_avg', $row ? round((float) $row->rating_avg, 2) : null);
                 $u->setAttribute('rating_count', $row ? (int) $row->rating_count : 0);
             });
+        }
+
+        if ($minRating !== null && $minRating > 0) {
+            $withDistance = $withDistance->filter(function (User $u) use ($minRating) {
+                $avg = $u->getAttribute('rating_avg');
+
+                return $avg !== null && (float) $avg >= $minRating;
+            })->values();
         }
 
         return response()->json($withDistance);

@@ -46,6 +46,7 @@ class DatabaseSeeder extends Seeder
                 'phone' => '+22890000002',
                 'password' => $password,
                 'role' => 'mecanicien',
+                'mechanic_specialty' => 'Moteur, batterie, pneumatiques',
                 'is_available' => true,
                 'latitude' => $demoLat,
                 'longitude' => $demoLng,
