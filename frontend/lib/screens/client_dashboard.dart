@@ -3,19 +3,36 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:image_picker/image_picker.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
 import '../services/google_sign_in_service.dart';
+import '../services/app_notification_hub.dart';
+import '../services/profile_signals.dart';
 import '../services/push_service.dart';
 import '../theme/feu_theme.dart';
+import '../utils/gps_helper.dart';
+import '../utils/list_search.dart';
 import '../utils/phone_launch.dart';
+import '../widgets/dashboard_search_bar.dart';
+import '../widgets/create_request_sheet.dart';
+import '../widgets/maps_discovery_shell.dart';
 import '../widgets/mechanic_nearby_map.dart';
+import '../widgets/public_network_image.dart';
+import '../widgets/request_list_tile.dart';
+import '../widgets/mechanic_info_card.dart';
+import '../screens/user_profile_page.dart';
+import '../utils/online_status.dart';
+import '../utils/profile_navigation.dart';
+import '../widgets/user_avatar.dart';
+import '../screens/history_screen.dart';
+import '../screens/notifications_panel.dart';
+import '../widgets/dashboard_brand_bar.dart';
+import '../utils/recent_addresses.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key, this.initialTabIndex = 0});
 
-  /// Onglet initial (0 = Proches, 1 = Demandes), ex. depuis une notification.
+  /// Onglet initial (0 = Carte, 1 = Demandes, 2 = Historique).
   final int initialTabIndex;
 
   @override
@@ -36,6 +53,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   double? lng;
   String currentName = 'Client';
   String currentRole = 'client';
+  String? _myAvatarUrl;
+  int? _myAvatarCacheEpoch;
+  /// Incrémenté quand l’API renvoie des URLs d’avatars distantes différentes (évite le cache navigateur).
+  int _remoteAvatarEpoch = 0;
+  String _cachedRemoteAvatarSig = '';
   late int _tabIndex;
   Timer? _refreshTimer;
   StreamSubscription<Position>? _positionSub;
@@ -46,17 +68,51 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   double _searchRadiusKm = 5;
   int _minStarsFilter = 0;
   final TextEditingController _specialtyFilterCtrl = TextEditingController();
+  final TextEditingController _mechanicKeywordCtrl = TextEditingController();
+  final TextEditingController _requestSearchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tabIndex = widget.initialTabIndex.clamp(0, 1);
+    _tabIndex = widget.initialTabIndex.clamp(0, 2);
     WidgetsBinding.instance.addObserver(this);
+    AppNotificationHub.instance.addListener(_onNotificationsChanged);
+    ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
+    _mechanicKeywordCtrl.addListener(_onMechanicSearchChanged);
     _loadPublicConfig();
     _refreshAll();
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshListsOnly());
     _syncPush();
     _startPositionTracking();
+  }
+
+  void _onNotificationsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onProfilesExternallyUpdated() {
+    if (mounted) setState(() {});
+    _refreshAll(silent: true, requireFreshGps: false);
+  }
+
+  int get _peerAvatarCacheEpoch => Object.hash(_remoteAvatarEpoch, ProfileSignals.instance.generation);
+
+  String _remoteAvatarSignature() {
+    final parts = <String>[];
+    for (final m in _apiMechanics) {
+      parts.add(m['avatar_url']?.toString() ?? '');
+    }
+    for (final raw in requests) {
+      if (raw is! Map) continue;
+      final r = Map<String, dynamic>.from(raw);
+      final mech = _mechanicFromRequest(r);
+      if (mech != null) parts.add(mech['avatar_url']?.toString() ?? '');
+    }
+    return parts.join('\x1e');
+  }
+
+  void _onMechanicSearchChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadPublicConfig() async {
@@ -102,7 +158,55 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _refreshTimer?.cancel();
     _positionSub?.cancel();
     _specialtyFilterCtrl.dispose();
+    _mechanicKeywordCtrl.dispose();
+    _requestSearchCtrl.dispose();
+    AppNotificationHub.instance.removeListener(_onNotificationsChanged);
+    ProfileSignals.instance.removeListener(_onProfilesExternallyUpdated);
+    _mechanicKeywordCtrl.removeListener(_onMechanicSearchChanged);
     super.dispose();
+  }
+
+  List<dynamic> get _displayMechanics {
+    final q = _mechanicKeywordCtrl.text;
+    return mechanics.where((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      return matchesListSearch(q, [
+        m['name']?.toString(),
+        m['mechanic_specialty']?.toString(),
+        m['phone']?.toString(),
+      ]);
+    }).toList();
+  }
+
+  int get _pendingRequestsCount {
+    return requests.where((raw) {
+      final s = (raw is Map ? raw['status'] : null)?.toString();
+      return s == 'pending' || s == 'accepted';
+    }).length;
+  }
+
+  void _openNotifications() {
+    AppNotificationHub.instance.markAllRead();
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const NotificationsPage()),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  List<dynamic> get _filteredRequests {
+    final q = _requestSearchCtrl.text;
+    return requests.where((raw) {
+      final r = Map<String, dynamic>.from(raw as Map);
+      return matchesListSearch(q, [
+        r['vehicle_type']?.toString(),
+        r['description']?.toString(),
+        r['status']?.toString(),
+        _mechanicNameFromRequest(r),
+        r['id']?.toString(),
+      ]);
+    }).toList();
   }
 
   /// Rafraîchit mécaniciens + demandes en réutilisant la position déjà connue (rapide).
@@ -127,6 +231,12 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }
     currentName = session['name'] ?? 'Client';
     currentRole = session['role'] ?? 'client';
+    final me = await ApiService.getMe(token);
+    final ms = me['status'] as int?;
+    if (ms != null && ms >= 200 && ms < 300) {
+      _myAvatarUrl = me['avatar_url']?.toString();
+      _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+    }
 
     String? errorMsg;
     try {
@@ -222,10 +332,15 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         errorMsg ??= reqRes['message']?.toString() ?? 'Impossible de charger tes demandes (code ${reqRes['status']}).';
       }
     } catch (_) {
-      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion et que l’API tourne (port 8000).';
+      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion.';
     }
 
     if (!mounted) return;
+    final nextSig = _remoteAvatarSignature();
+    if (nextSig != _cachedRemoteAvatarSig) {
+      _cachedRemoteAvatarSig = nextSig;
+      _remoteAvatarEpoch++;
+    }
     setState(() {
       loading = false;
       _initializing = false;
@@ -279,154 +394,75 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   /// Dernière position connue puis GPS actuel (évite d’attendre à chaque rafraîchissement).
-  Future<Position?> _getPositionBestEffort() async {
-    if (!await _ensureLocationPermission()) {
-      return null;
-    }
-    try {
-      final last = await Geolocator.getLastKnownPosition();
-      if (last != null) {
-        return last;
-      }
-    } catch (_) {}
-    try {
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
-      ).timeout(
-        const Duration(seconds: 6),
-        onTimeout: () => throw TimeoutException('GPS timeout'),
+  Future<Position?> _getPositionBestEffort() => GpsHelper.bestPosition();
+
+  Future<void> _recenterMap() async {
+    final pos = await GpsHelper.bestPosition();
+    if (pos != null) {
+      lat = pos.latitude;
+      lng = pos.longitude;
+      await _refreshAll(silent: false, requireFreshGps: false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Position mise à jour.')),
       );
-    } catch (_) {
-      return null;
+      return;
     }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('GPS indisponible. Active la localisation du téléphone.'),
+        action: SnackBarAction(
+          label: 'Réglages',
+          onPressed: () => GpsHelper.openSettingsIfNeeded(),
+        ),
+      ),
+    );
   }
 
   Future<void> _createRequest(Map<String, dynamic> mechanic) async {
     if (_sendingRequest) {
       return;
     }
-    final descCtrl = TextEditingController();
-    final addressCtrl = TextEditingController();
-    String vehicleType = 'voiture';
-    XFile? pickedPhoto;
-    final picker = ImagePicker();
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setInnerState) => AlertDialog(
-          title: Text('Demande à ${mechanic['name']}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButton<String>(
-                value: vehicleType,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(value: 'voiture', child: Text('Voiture')),
-                  DropdownMenuItem(value: 'moto', child: Text('Moto')),
-                  DropdownMenuItem(value: 'autre', child: Text('Autre')),
-                ],
-                onChanged: (v) => setInnerState(() => vehicleType = v ?? 'voiture'),
-              ),
-              TextField(
-                controller: descCtrl,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(hintText: 'Décris la panne'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: addressCtrl,
-                minLines: 1,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  hintText: 'Adresse ou lieu-dit (optionnel)',
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Photo (optionnel)',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade800),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final x = await picker.pickImage(
-                        source: ImageSource.gallery,
-                        maxWidth: 2048,
-                        maxHeight: 2048,
-                        imageQuality: 85,
-                      );
-                      if (x != null) {
-                        setInnerState(() => pickedPhoto = x);
-                      }
-                    },
-                    icon: const Icon(Icons.photo_library_outlined, size: 18),
-                    label: const Text('Galerie'),
-                  ),
-                  if (!kIsWeb)
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final x = await picker.pickImage(
-                          source: ImageSource.camera,
-                          maxWidth: 2048,
-                          maxHeight: 2048,
-                          imageQuality: 85,
-                        );
-                        if (x != null) {
-                          setInnerState(() => pickedPhoto = x);
-                        }
-                      },
-                      icon: const Icon(Icons.photo_camera_outlined, size: 18),
-                      label: const Text('Appareil photo'),
-                    ),
-                  if (pickedPhoto != null)
-                    TextButton(
-                      onPressed: () => setInnerState(() => pickedPhoto = null),
-                      child: const Text('Retirer la photo'),
-                    ),
-                ],
-              ),
-              if (pickedPhoto != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    pickedPhoto!.name,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
+    setState(() => _sendingRequest = true);
+    final pos = await GpsHelper.bestPosition();
+    if (pos != null) {
+      lat = pos.latitude;
+      lng = pos.longitude;
+      final token = await AuthStorage.getToken();
+      if (token != null) {
+        await ApiService.updateLocation(token, pos.latitude, pos.longitude);
+      }
+    }
+    if (!mounted) return;
+    setState(() => _sendingRequest = false);
+
+    if (lat == null || lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Position requise pour signaler une panne. Active le GPS.'),
+          action: SnackBarAction(
+            label: 'Réglages',
+            onPressed: () => GpsHelper.openSettingsIfNeeded(),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Annuler')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(dialogCtx, true),
-              child: const Text('Envoyer'),
-            ),
-          ],
         ),
-      ),
+      );
+      return;
+    }
+
+    final recent = await RecentAddresses.load();
+    if (!mounted) return;
+    final result = await CreateRequestSheet.show(
+      context,
+      mechanicName: mechanic['name']?.toString() ?? 'mécanicien',
+      pickupLabel: _pickupLabel(),
+      recentAddresses: recent,
+      onRefreshLocation: _refreshLocationForRequest,
     );
 
     try {
-      if (confirmed != true) {
-        return;
-      }
-      if (lat == null || lng == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Position indisponible. Autorise la géolocalisation puis réessaie.')),
-        );
+      if (result == null) {
         return;
       }
       final token = await AuthStorage.getToken();
@@ -440,26 +476,22 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mécanicien invalide.')));
         return;
       }
-      final desc = descCtrl.text.trim();
-      if (desc.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ajoute une description de la panne.')));
-        return;
-      }
+      final desc = result.description;
+      final vehicleType = result.vehicleType;
 
       Uint8List? photoBytes;
       String? photoFilename;
-      if (pickedPhoto != null) {
+      if (result.photo != null) {
         try {
-          photoBytes = await pickedPhoto!.readAsBytes();
-          photoFilename = pickedPhoto!.name;
+          photoBytes = await result.photo!.readAsBytes();
+          photoFilename = result.photo!.name;
         } catch (_) {
           photoBytes = null;
           photoFilename = null;
         }
       }
 
-      final addr = addressCtrl.text.trim();
+      final addr = result.address?.trim() ?? '';
       setState(() => _sendingRequest = true);
       final res = await ApiService.createRequest(
         token: token,
@@ -485,14 +517,16 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         ),
       );
       if (ok) {
+        final addr = result.address?.trim();
+        if (addr != null && addr.isNotEmpty) {
+          await RecentAddresses.add(addr);
+        }
         await _refreshAll(silent: true, requireFreshGps: false);
         if (mounted) {
           setState(() => _tabIndex = 1);
         }
       }
     } finally {
-      descCtrl.dispose();
-      addressCtrl.dispose();
       if (mounted) {
         setState(() => _sendingRequest = false);
       }
@@ -585,6 +619,33 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         return 'Terminée ($o)${hasRating ? ' · ${rt['stars']}/5 ★' : ''}';
       default:
         return 'Statut : ${r['status']}';
+    }
+  }
+
+  Color _requestStatusColor(String? status) {
+    switch (status) {
+      case 'accepted':
+        return Colors.green.shade600;
+      case 'pending':
+        return FeuTheme.ember;
+      case 'declined':
+      case 'cancelled':
+        return Colors.red.shade600;
+      case 'completed':
+        return Colors.grey.shade600;
+      default:
+        return FeuTheme.deepBlue;
+    }
+  }
+
+  String? _requestTimeLabel(Map<String, dynamic> r) {
+    final raw = r['created_at']?.toString() ?? r['updated_at']?.toString();
+    if (raw == null || raw.length < 16) return null;
+    try {
+      final dt = DateTime.parse(raw).toLocal();
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return raw.length >= 16 ? raw.substring(11, 16) : null;
     }
   }
 
@@ -740,44 +801,32 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       ),
       child: Scaffold(
       backgroundColor: FeuTheme.paper,
-      appBar: FeuTheme.fireAppBar(
-        title: 'MechAssist',
-        automaticallyImplyLeading: false,
-        actions: [
+      appBar: DashboardBrandBar(
+        pendingRequestsCount: _pendingRequestsCount,
+        unreadNotificationsCount: AppNotificationHub.instance.unreadCount,
+        onOpenNotifications: _openNotifications,
+        onOpenRequests: () => setState(() => _tabIndex = 1),
+        trailing: [
           IconButton(
-            icon: const Icon(Icons.person_outline_rounded),
-            tooltip: 'Mon profil',
-            onPressed: () async {
-              final changed = await Navigator.pushNamed(context, '/profile');
-              if (!mounted) return;
-              if (changed == true) {
-                await _refreshAll(silent: true, requireFreshGps: false);
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            tooltip: 'Aide',
-            onPressed: () => Navigator.pushNamed(context, '/help'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _refreshAll(silent: false, requireFreshGps: true),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
             tooltip: 'Déconnexion',
             onPressed: () => _confirmLogout(context),
-          )
+          ),
         ],
       ),
-      body: _initializing && loading
+      body: _initializing && loading && _tabIndex == 0
           ? const Center(child: CircularProgressIndicator(color: FeuTheme.ember))
           : IndexedStack(
               index: _tabIndex,
               children: [
                 _buildHomeTab(),
                 _buildRequestsTab(),
+                HistoryScreen(
+                  requests: requests,
+                  onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
+                  mechanicNameFor: _mechanicNameFromRequest,
+                  onOpenRequest: _showRequestDetail,
+                ),
               ],
             ),
       bottomNavigationBar: BottomNavigationBar(
@@ -788,248 +837,338 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         unselectedItemColor: Colors.grey.shade600,
         type: BottomNavigationBarType.fixed,
         elevation: 8,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.near_me_outlined), activeIcon: Icon(Icons.near_me), label: 'Proches'),
-          BottomNavigationBarItem(icon: Icon(Icons.assignment_outlined), activeIcon: Icon(Icons.assignment), label: 'Demandes'),
+        items: [
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.map_outlined),
+            activeIcon: Icon(Icons.map_rounded),
+            label: 'Carte',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.assignment_outlined),
+            activeIcon: Icon(Icons.assignment),
+            label: 'Demandes',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.history_outlined),
+            activeIcon: Icon(Icons.history_rounded),
+            label: 'Historique',
+          ),
         ],
       ),
     ),
     );
   }
 
-  Widget _buildHomeTab() {
-    return RefreshIndicator(
-      onRefresh: () => _refreshAll(silent: false, requireFreshGps: true),
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (lastError != null)
-            Card(
-              color: Colors.red.shade50,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.error_outline, color: Colors.red),
-                    title: Text(lastError!, style: const TextStyle(color: Colors.red)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                    child: TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/help'),
-                      child: const Text('Configurer l’URL du serveur (Wi‑Fi / PC)'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          const Text('Mécaniciens proches', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          if (lat != null && lng != null)
-            SizedBox(
-              height: 280,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: MechanicNearbyMap(
-                  clientLat: lat!,
-                  clientLng: lng!,
-                  mechanics: mechanics.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
-                  googleMapsWebApiKey: _googleMapsWebKey,
-                ),
-              ),
-            ),
-          if (lat == null || lng == null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Active la localisation pour voir la carte et les mécaniciens.',
-                style: TextStyle(color: Colors.grey.shade800, fontSize: 14),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text('Affiner la recherche', style: TextStyle(fontWeight: FontWeight.w700)),
-                  Row(
-                    children: [
-                      Text('Rayon ${_searchRadiusKm.round()} km', style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
-                      Expanded(
-                        child: Slider(
-                          value: _searchRadiusKm.clamp(1, 50),
-                          min: 1,
-                          max: 50,
-                          divisions: 49,
-                          label: '${_searchRadiusKm.round()} km',
-                          onChanged: (v) => setState(() => _searchRadiusKm = v),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('Note min. '),
-                      DropdownButton<int>(
-                        value: _minStarsFilter,
-                        items: List.generate(
-                          6,
-                          (i) => DropdownMenuItem(
-                            value: i,
-                            child: Text(i == 0 ? '—' : '$i★ et +'),
-                          ),
-                        ),
-                        onChanged: (v) => setState(() => _minStarsFilter = v ?? 0),
-                      ),
-                    ],
-                  ),
-                  TextField(
-                    controller: _specialtyFilterCtrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Spécialité (contient…)',
-                      isDense: true,
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () => _refreshAll(silent: true, requireFreshGps: false),
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Appliquer'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          if (mechanics.isEmpty)
-            const Card(
-              child: ListTile(
-                title: Text('Aucun mecanicien disponible'),
-                subtitle: Text('Essaie de rafraichir ou elargir la zone.'),
-              ),
-            ),
-          ...mechanics.map((raw) {
-            final m = Map<String, dynamic>.from(raw as Map);
-            final phoneRaw = m['phone']?.toString();
-            final canDial = normalizePhoneForDial(phoneRaw) != null;
-            return Card(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      m['name']?.toString() ?? 'Mécanicien',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                    ),
-                    if (m['mechanic_specialty'] != null && m['mechanic_specialty'].toString().trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        m['mechanic_specialty'].toString(),
-                        style: TextStyle(fontSize: 14, height: 1.25, color: Colors.grey.shade800),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.place_outlined, size: 18, color: Colors.grey.shade700),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '${m['distance_km']} km'
-                            '${m['is_online'] == true ? ' · En ligne' : ''}'
-                            '${_mechanicRatingLine(m)}',
-                            style: TextStyle(fontSize: 14, color: Colors.grey.shade800),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    if (canDial) ...[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(Icons.phone_rounded, size: 20, color: FeuTheme.ember),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: SelectableText(
-                              (phoneRaw ?? '').trim(),
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                    ] else ...[
-                      Text(
-                        'Pas de numéro renseigné pour ce mécanicien.',
-                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: (!canDial || _sendingRequest)
-                                ? null
-                                : () => launchTelDialer(context, phoneRaw),
-                            icon: const Icon(Icons.call_rounded, size: 20),
-                            label: const Text('Appeler'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: FeuTheme.ember,
-                              side: BorderSide(color: FeuTheme.ember.withValues(alpha: canDial ? 1 : 0.35)),
-                              minimumSize: const Size.fromHeight(50),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _sendingRequest ? null : () => _createRequest(m),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: FeuTheme.ember,
-                              minimumSize: const Size.fromHeight(50),
-                            ),
-                            child: _sendingRequest
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                  )
-                                : const Text('Demander'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-          if (kIsWeb && _showWebMapHint)
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Aide carte (Web)'),
-                subtitle: const Text(
-                  'Autorise la géolocalisation dans le navigateur. Clé Google Maps optionnelle côté serveur (GOOGLE_MAPS_WEB_API_KEY) ; sinon carte Carto.',
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => setState(() => _showWebMapHint = false),
-                  tooltip: 'Masquer',
-                ),
-              ),
-            ),
-        ],
+  void _cycleSearchRadius() {
+    setState(() {
+      if (_searchRadiusKm < 5) {
+        _searchRadiusKm = 5;
+      } else if (_searchRadiusKm < 10) {
+        _searchRadiusKm = 10;
+      } else if (_searchRadiusKm < 20) {
+        _searchRadiusKm = 20;
+      } else {
+        _searchRadiusKm = 50;
+      }
+    });
+    _refreshAll(silent: true, requireFreshGps: false);
+  }
+
+  void _cycleMinStars() {
+    setState(() {
+      if (_minStarsFilter == 0) {
+        _minStarsFilter = 3;
+      } else if (_minStarsFilter == 3) {
+        _minStarsFilter = 4;
+      } else if (_minStarsFilter == 4) {
+        _minStarsFilter = 5;
+      } else {
+        _minStarsFilter = 0;
+      }
+    });
+    _refreshAll(silent: true, requireFreshGps: false);
+  }
+
+  List<Widget> _clientFilterChips() {
+    return [
+      MapsFilterChip(
+        label: 'Toutes',
+        icon: Icons.grid_view_rounded,
+        selected: _minStarsFilter == 0 && _specialtyFilterCtrl.text.trim().isEmpty,
+        onTap: () {
+          setState(() {
+            _minStarsFilter = 0;
+            _specialtyFilterCtrl.clear();
+            _mechanicKeywordCtrl.clear();
+          });
+          _refreshAll(silent: true, requireFreshGps: false);
+        },
       ),
+      MapsFilterChip(
+        label: '${_searchRadiusKm.round()} km',
+        icon: Icons.radar_rounded,
+        onTap: _cycleSearchRadius,
+      ),
+      MapsFilterChip(
+        label: _minStarsFilter == 0 ? 'Toutes notes' : '$_minStarsFilter★+',
+        icon: Icons.star_rounded,
+        onTap: _cycleMinStars,
+      ),
+      MapsFilterChip(
+        label: 'Spécialité',
+        icon: Icons.build_rounded,
+        onTap: () => _showSpecialtyFilterSheet(),
+      ),
+    ];
+  }
+
+  void _showSpecialtyFilterSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _specialtyFilterCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Spécialité',
+                hintText: 'Ex. moteur, pneu…',
+              ),
+            ),
+            const SizedBox(height: 14),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _refreshAll(silent: true, requireFreshGps: false);
+              },
+              style: FilledButton.styleFrom(backgroundColor: FeuTheme.ember),
+              child: const Text('Appliquer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClientMapLayer() {
+    if (lat != null && lng != null) {
+      return MechanicNearbyMap(
+        clientLat: lat!,
+        clientLng: lng!,
+        mechanics: _displayMechanics.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
+        googleMapsWebApiKey: _googleMapsWebKey,
+      );
+    }
+    return ColoredBox(
+      color: const Color(0xFFE8ECEF),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.location_off_rounded, size: 48, color: FeuTheme.deepBlue.withValues(alpha: 0.5)),
+              const SizedBox(height: 12),
+              Text(
+                'Active la localisation pour afficher la carte.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade800, fontSize: 15),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () => _refreshAll(silent: false, requireFreshGps: true),
+                icon: const Icon(Icons.my_location_rounded),
+                label: const Text('Activer le GPS'),
+                style: FilledButton.styleFrom(backgroundColor: FeuTheme.deepBlue),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openMechanicProfile(Map<String, dynamic> m) {
+    final user = Map<String, dynamic>.from(m);
+    user['role'] = 'mecanicien';
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => UserProfilePage(
+          user: user,
+          subtitle: m['distance_km'] != null ? '${m['distance_km']} km' : null,
+          onMessage: null,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMechanicResultTile(Map<String, dynamic> m) {
+    final phoneRaw = m['phone']?.toString();
+    final canDial = normalizePhoneForDial(phoneRaw) != null;
+    final name = m['name']?.toString() ?? 'Mécanicien';
+    final online = userIsOnline(m);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: FeuTheme.ember.withValues(alpha: 0.12)),
+      ),
+      child: InkWell(
+        onTap: () => _openMechanicProfile(m),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                UserAvatar(
+                  name: name,
+                  avatarUrl: m['avatar_url']?.toString(),
+                  cacheEpoch: _peerAvatarCacheEpoch,
+                  radius: 26,
+                  showOnline: true,
+                  isOnline: online,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                  ),
+                ),
+              ],
+            ),
+            if (m['mechanic_specialty'] != null && m['mechanic_specialty'].toString().trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                m['mechanic_specialty'].toString(),
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade800),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Text(
+              '${m['distance_km']} km'
+              '${online ? ' · En ligne' : ''}'
+              '${_mechanicRatingLine(m)}',
+              style: TextStyle(fontSize: 13.5, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: (!canDial || _sendingRequest) ? null : () => launchTelDialer(context, phoneRaw),
+                    icon: const Icon(Icons.call_rounded, size: 20),
+                    label: const Text('Appeler'),
+                    style: OutlinedButton.styleFrom(foregroundColor: FeuTheme.ember),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _sendingRequest ? null : () => _createRequest(m),
+                    style: FilledButton.styleFrom(backgroundColor: FeuTheme.ember),
+                    child: _sendingRequest
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Demander'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      ),
+    );
+  }
+
+  Widget _buildHomeTab() {
+    return MapsDiscoveryShell(
+      map: _buildClientMapLayer(),
+      loading: loading,
+      searchController: _mechanicKeywordCtrl,
+      searchHint: 'Mécaniciens, spécialité…',
+      onSearch: () => setState(() {}),
+      onRecenter: _recenterMap,
+      onPrimaryFab: () => _refreshAll(silent: true, requireFreshGps: false),
+      profileInitial: currentName,
+      profileAvatarUrl: _myAvatarUrl,
+      profileAvatarCacheEpoch: _myAvatarCacheEpoch,
+      onProfileTap: () async {
+        final result = await Navigator.pushNamed(context, '/profile');
+        if (!mounted) return;
+        final parsed = ProfileNavigationResult.fromDynamic(result);
+        if (parsed != null) {
+          setState(() {
+            if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
+              _myAvatarUrl = parsed.avatarUrl;
+              _myAvatarCacheEpoch = parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
+            }
+          });
+          if (parsed.updated) {
+            await _refreshAll(silent: true, requireFreshGps: false);
+          }
+        }
+      },
+      filterChips: _clientFilterChips(),
+      sheetTitle: 'Mécaniciens proches',
+      sheetSubtitle: lat == null
+          ? 'Localisation requise'
+          : '${_displayMechanics.length} résultat(s) · rayon ${_searchRadiusKm.round()} km',
+      topBanner: lastError != null
+          ? Material(
+              color: Colors.red.shade50,
+              child: ListTile(
+                dense: true,
+                leading: const Icon(Icons.error_outline, color: Colors.red),
+                title: Text(lastError!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.refresh_rounded, color: Colors.red),
+                  onPressed: () => _refreshAll(silent: false, requireFreshGps: false),
+                ),
+              ),
+            )
+          : null,
+      onSheetRefresh: () => _refreshAll(silent: false, requireFreshGps: true),
+      buildSheetBody: () {
+        return [
+          if (_displayMechanics.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                mechanics.isEmpty
+                    ? 'Aucun mécanicien dans cette zone. Élargis le rayon ou réessaie.'
+                    : 'Aucun résultat pour cette recherche.',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              ),
+            ),
+          ..._displayMechanics.map((raw) => _buildMechanicResultTile(Map<String, dynamic>.from(raw as Map))),
+          if (kIsWeb && _showWebMapHint)
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Carte web', style: TextStyle(fontSize: 14)),
+              trailing: IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => setState(() => _showWebMapHint = false),
+              ),
+            ),
+        ];
+      },
     );
   }
 
@@ -1039,6 +1178,39 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       return m['name']?.toString() ?? '—';
     }
     return '—';
+  }
+
+  Map<String, dynamic>? _mechanicFromRequest(Map<String, dynamic> r) {
+    final m = r['mechanic'];
+    if (m is Map) return Map<String, dynamic>.from(m);
+    return null;
+  }
+
+  Map<String, dynamic>? _activeAcceptedRequest() {
+    for (final raw in requests) {
+      final r = Map<String, dynamic>.from(raw as Map);
+      if (r['status']?.toString() == 'accepted') return r;
+    }
+    return null;
+  }
+
+  String _pickupLabel() {
+    if (lat == null || lng == null) return 'Position en cours…';
+    return 'Ma position · ${lat!.toStringAsFixed(4)}, ${lng!.toStringAsFixed(4)}';
+  }
+
+  Future<String?> _refreshLocationForRequest() async {
+    final pos = await GpsHelper.bestPosition();
+    if (pos == null || !mounted) return null;
+    setState(() {
+      lat = pos.latitude;
+      lng = pos.longitude;
+    });
+    final token = await AuthStorage.getToken();
+    if (token != null) {
+      await ApiService.updateLocation(token, pos.latitude, pos.longitude);
+    }
+    return _pickupLabel();
   }
 
   void _showRequestDetail(Map<String, dynamic> r) {
@@ -1053,7 +1225,27 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
+              if (_mechanicFromRequest(r) != null) ...[
+                MechanicInfoCard(
+                  name: _mechanicNameFromRequest(r),
+                  phone: _mechanicFromRequest(r)!['phone']?.toString(),
+                  specialty: _mechanicFromRequest(r)!['mechanic_specialty']?.toString(),
+                  avatarUrl: _mechanicFromRequest(r)!['avatar_url']?.toString(),
+                  avatarCacheEpoch: _peerAvatarCacheEpoch,
+                  mechanicUser: _mechanicFromRequest(r),
+                  isOnline: userIsOnline(_mechanicFromRequest(r)),
+                  compact: true,
+                  onCall: () => launchTelDialer(context, _mechanicFromRequest(r)!['phone']?.toString()),
+                  onChat: id != null && r['status']?.toString() == 'accepted'
+                      ? () {
+                          Navigator.pop(ctx);
+                          _openChat(id);
+                        }
+                      : null,
+                ),
+                const SizedBox(height: 8),
+              ] else
+                Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
               const SizedBox(height: 8),
               Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
               const SizedBox(height: 8),
@@ -1083,14 +1275,12 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
               ],
               if (r['photo_url'] != null && r['photo_url'].toString().trim().isNotEmpty) ...[
                 const SizedBox(height: 12),
-                ClipRRect(
+                PublicNetworkImage(
+                  url: r['photo_url'].toString(),
+                  width: double.infinity,
+                  height: 160,
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    ApiService.resolvePublicUrl(r['photo_url'].toString()),
-                    height: 160,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Text('Image indisponible'),
-                  ),
+                  icon: Icons.broken_image_outlined,
                 ),
               ],
             ],
@@ -1168,36 +1358,97 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Widget _buildRequestsTab() {
+    final active = _activeAcceptedRequest();
+    final mechanic = active != null ? _mechanicFromRequest(active) : null;
+    final activeId = active != null ? ApiService.parseIntId(active['id']) : null;
+
     return RefreshIndicator(
       onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
+      color: FeuTheme.ember,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.zero,
         children: [
-          const Text('Mes demandes', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          if (requests.isEmpty)
-            const Card(
-              child: ListTile(
-                title: Text('Aucune demande pour le moment'),
-                subtitle: Text('Envoie une demande depuis l’onglet Proches.'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+            child: Text(
+              'Mes demandes',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: FeuTheme.charcoal,
               ),
             ),
-          ...requests.map((raw) {
+          ),
+          if (mechanic != null && activeId != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: MechanicInfoCard(
+                name: mechanic['name']?.toString() ?? 'Mécanicien',
+                phone: mechanic['phone']?.toString(),
+                specialty: mechanic['mechanic_specialty']?.toString(),
+                avatarUrl: mechanic['avatar_url']?.toString(),
+                avatarCacheEpoch: _peerAvatarCacheEpoch,
+                mechanicUser: mechanic,
+                isOnline: userIsOnline(mechanic),
+                onCall: () => launchTelDialer(context, mechanic['phone']?.toString()),
+                onChat: () => _openChat(activeId),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: DashboardSearchBar(
+              controller: _requestSearchCtrl,
+              hintText: 'Véhicule, mécanicien, statut…',
+              loading: loading,
+              onChanged: () => setState(() {}),
+            ),
+          ),
+          if (_filteredRequests.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade400),
+                  const SizedBox(height: 12),
+                  Text(
+                    requests.isEmpty ? 'Aucune demande pour le moment' : 'Aucun résultat',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    requests.isEmpty
+                        ? 'Envoie une demande depuis l’onglet Carte.'
+                        : 'Modifie la recherche.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+          ..._filteredRequests.map((raw) {
             final r = Map<String, dynamic>.from(raw as Map);
             final id = ApiService.parseIntId(r['id']);
-            return Card(
-              child: ListTile(
-                title: Text('${r['vehicle_type'] ?? '—'} • ${_mechanicNameFromRequest(r)}'),
-                subtitle: Text(
-                  '${r['description']?.toString() ?? ''}\n${_requestStatusLine(r)}',
+            final status = r['status']?.toString();
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RequestListTile(
+                  mechanicName: _mechanicNameFromRequest(r),
+                  vehicleType: r['vehicle_type']?.toString() ?? '—',
+                  preview: r['description']?.toString() ?? '—',
+                  statusLine: _requestStatusLine(r),
+                  statusColor: _requestStatusColor(status),
+                  timeLabel: _requestTimeLabel(r),
+                  onTap: () => _showRequestDetail(r),
+                  trailing: _buildRequestListTrailing(r, id),
                 ),
-                isThreeLine: true,
-                onTap: () => _showRequestDetail(r),
-                trailing: _buildRequestListTrailing(r, id),
-              ),
+                Divider(height: 1, indent: 72, color: Colors.grey.shade200),
+              ],
             );
           }),
+          const SizedBox(height: 24),
         ],
       ),
     );

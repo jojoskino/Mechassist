@@ -40,3 +40,38 @@ class MechAssistLogoBadge extends StatelessWidget {
     );
   }
 }
+
+/// Petit logo rond pour la barre MechAssist en haut.
+class MechAssistLogoChip extends StatelessWidget {
+  const MechAssistLogoChip({super.key, this.size = 36});
+
+  final double size;
+
+  static const String _assetPath = 'assets/images/logo.png';
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 0,
+      shape: const CircleBorder(),
+      color: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Padding(
+          padding: EdgeInsets.all(size * 0.1),
+          child: Image.asset(
+            _assetPath,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Icon(
+              Icons.local_fire_department_rounded,
+              color: const Color(0xFF0F4C75),
+              size: size * 0.55,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

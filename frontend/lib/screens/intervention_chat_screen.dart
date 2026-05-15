@@ -6,12 +6,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/profile_signals.dart';
 import '../theme/feu_theme.dart';
 import '../utils/read_file_bytes.dart';
+import '../utils/phone_launch.dart';
+import '../widgets/chat_composer_bar.dart';
+import '../widgets/chat_message_bubble.dart';
+import '../widgets/chat_screen_header.dart';
+import '../screens/user_profile_page.dart';
 
 /// Discussion intervention : style messagerie (bulles, fond), couleurs MechAssist,
 /// rafraîchissement rapide, texte + photo + vocal (hors web pour le micro).
@@ -33,6 +40,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   final ImagePicker _picker = ImagePicker();
 
   Timer? _poll;
+  Timer? _peerPoll;
   StreamSubscription<void>? _playerCompleteSub;
 
   List<dynamic> _messages = [];
@@ -49,11 +57,18 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   bool _foreground = true;
   int? _playingMessageId;
   DateTime? _recordStartedAt;
+  String _peerName = 'Interlocuteur';
+  Map<String, dynamic>? _peerMechanic;
+  Map<String, dynamic>? _peerClient;
+  bool _iAmClient = false;
+  int _peerAvatarEpoch = 0;
+  String? _lastPeerAvatarUrlSnapshot;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ProfileSignals.instance.addListener(_onProfileSignals);
     _playerCompleteSub = _player.onPlayerComplete.listen((_) {
       if (mounted) setState(() => _playingMessageId = null);
     });
@@ -63,7 +78,9 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ProfileSignals.instance.removeListener(_onProfileSignals);
     _poll?.cancel();
+    _peerPoll?.cancel();
     _playerCompleteSub?.cancel();
     unawaited(_player.dispose());
     unawaited(_recorder.dispose());
@@ -83,6 +100,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         state == AppLifecycleState.detached) {
       _foreground = false;
       _poll?.cancel();
+      _peerPoll?.cancel();
       if (_recording) {
         unawaited(_cancelRecording());
       }
@@ -91,8 +109,40 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
 
   void _startFastPoll() {
     _poll?.cancel();
+    _peerPoll?.cancel();
     if (!_foreground) return;
-    _poll = Timer.periodic(const Duration(milliseconds: 550), (_) => _load(silent: true));
+    _poll = Timer.periodic(const Duration(milliseconds: 750), (_) => _load(silent: true));
+    _peerPoll = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_foreground || !mounted) return;
+      unawaited(_refreshPeerSnapshot());
+    });
+  }
+
+  void _onProfileSignals() {
+    if (_authToken == null) return;
+    if (mounted) setState(() {});
+    unawaited(_bootstrapAccess());
+  }
+
+  Future<void> _refreshPeerSnapshot() async {
+    final token = _authToken;
+    if (token == null) return;
+    final res = await ApiService.getInterventionRequest(token, widget.requestId);
+    if (!mounted) return;
+    final code = res['http_status'] as int?;
+    if (code == null || code < 200 || code >= 300) return;
+    _applyPeerFromRequest(res);
+    _syncPeerAvatarEpochFromPeers();
+    setState(() {});
+  }
+
+  void _syncPeerAvatarEpochFromPeers() {
+    final peer = _iAmClient ? _peerMechanic : _peerClient;
+    final url = peer?['avatar_url']?.toString() ?? '';
+    if (_lastPeerAvatarUrlSnapshot != url) {
+      _lastPeerAvatarUrlSnapshot = url;
+      _peerAvatarEpoch++;
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -139,6 +189,11 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       await _load(silent: true);
       return;
     }
+    _applyPeerFromRequest(res);
+    _syncPeerAvatarEpochFromPeers();
+    if (mounted) {
+      setState(() {});
+    }
     final wf = res['status']?.toString();
     if (wf != null && wf != 'accepted') {
       setState(() {
@@ -170,13 +225,17 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   bool _messagesEqual(List<dynamic> a, List<dynamic> b) {
     if (identical(a, b)) return true;
     if (a.length != b.length) return false;
-    if (a.isEmpty) return true;
-    final la = a.last;
-    final lb = b.last;
-    if (la is Map && lb is Map) {
-      return la['id'] == lb['id'];
+    for (var i = 0; i < a.length; i++) {
+      final ma = a[i];
+      final mb = b[i];
+      if (ma is! Map || mb is! Map) return false;
+      if (ma['id'] != mb['id']) return false;
+      if (ma['read_at']?.toString() != mb['read_at']?.toString()) return false;
+      if (ma['body']?.toString() != mb['body']?.toString()) return false;
+      if (ma['kind']?.toString() != mb['kind']?.toString()) return false;
+      if (ma['media_url']?.toString() != mb['media_url']?.toString()) return false;
     }
-    return false;
+    return true;
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -252,15 +311,17 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       return;
     }
     _msgCtrl.clear();
-    await _load(silent: true);
     if (mounted) setState(() => _sending = false);
+    unawaited(_load(silent: true));
+    _poll?.cancel();
+    _startFastPoll();
   }
 
-  Future<void> _pickAndSendImage() async {
+  Future<void> _pickAndSendImage({ImageSource source = ImageSource.gallery}) async {
     final token = _authToken;
     if (token == null || _readOnly || _sending) return;
     final x = await _picker.pickImage(
-      source: ImageSource.gallery,
+      source: source,
       maxWidth: 1600,
       imageQuality: 85,
     );
@@ -328,11 +389,17 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       }
       return;
     }
-    final ok = await _recorder.hasPermission();
-    if (!ok) {
+    final micStatus = await Permission.microphone.request();
+    if (!micStatus.isGranted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Micro refusé — active-le dans les réglages du téléphone.')),
+          SnackBar(
+            content: const Text('Micro refusé — autorise le micro dans les réglages.'),
+            action: SnackBarAction(
+              label: 'Réglages',
+              onPressed: openAppSettings,
+            ),
+          ),
         );
       }
       return;
@@ -374,7 +441,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
     if (token == null || !mounted) return;
     if (path == null || path.isEmpty) return;
     final dur = started != null ? DateTime.now().difference(started) : Duration.zero;
-    if (dur < const Duration(milliseconds: 550)) {
+    if (dur < const Duration(milliseconds: 400)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Message trop court — maintiens plus longtemps.')),
@@ -402,7 +469,11 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
           ),
         );
       } else {
-        await _load(silent: true);
+        if (mounted) setState(() => _sending = false);
+        unawaited(_load(silent: true));
+        _poll?.cancel();
+        _startFastPoll();
+        return;
       }
     } catch (e) {
       if (mounted) {
@@ -428,6 +499,109 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
     if (mounted) setState(() => _playingMessageId = messageId);
   }
 
+  void _applyPeerFromRequest(Map<String, dynamic> res) {
+    final client = res['client'];
+    final mechanic = res['mechanic'];
+    final clientId = ApiService.parseIntId(res['client_id']);
+    _peerMechanic = mechanic is Map ? Map<String, dynamic>.from(mechanic) : null;
+    _peerClient = client is Map ? Map<String, dynamic>.from(client) : null;
+    _iAmClient = _myUserId != null && clientId != null && _myUserId == clientId;
+    if (_iAmClient) {
+      _peerName = _peerMechanic?['name']?.toString() ?? 'Mécanicien';
+    } else {
+      _peerName = _peerClient?['name']?.toString() ?? 'Client';
+    }
+  }
+
+  String? _dateSeparatorForIndex(int index) {
+    if (index < 0 || index >= _messages.length) return null;
+    final cur = _messages[index];
+    if (cur is! Map) return null;
+    final curAt = cur['created_at']?.toString() ?? '';
+    if (curAt.length < 10) return null;
+    final curDay = curAt.substring(0, 10);
+    if (index == 0) {
+      return _formatDayLabel(curAt);
+    }
+    final prev = _messages[index - 1];
+    if (prev is! Map) return null;
+    final prevAt = prev['created_at']?.toString() ?? '';
+    if (prevAt.length < 10 || prevAt.substring(0, 10) == curDay) {
+      return null;
+    }
+    return _formatDayLabel(curAt);
+  }
+
+  String _formatDayLabel(String iso) {
+    if (iso.length < 16) return iso;
+    try {
+      final dt = DateTime.parse(iso);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final msgDay = DateTime(dt.year, dt.month, dt.day);
+      final time =
+          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      if (msgDay == today) {
+        return "Aujourd'hui à $time";
+      }
+      final yesterday = today.subtract(const Duration(days: 1));
+      if (msgDay == yesterday) {
+        return 'Hier à $time';
+      }
+      return '${dt.day.toString().padLeft(2, '0')}/'
+          '${dt.month.toString().padLeft(2, '0')} à $time';
+    } catch (_) {
+      return iso.substring(0, 16);
+    }
+  }
+
+  String _timeLabel(String iso) {
+    if (iso.length >= 16) {
+      return iso.substring(11, 16);
+    }
+    return '';
+  }
+
+  String? _mediaUrlFromMessage(Map<String, dynamic> map) {
+    final url = map['media_url']?.toString();
+    if (url != null && url.trim().isNotEmpty && url != 'null') {
+      return url;
+    }
+    final path = map['media_path']?.toString();
+    if (path != null && path.trim().isNotEmpty && path != 'null') {
+      return path;
+    }
+    return null;
+  }
+
+  String? _peerPhone(Map<String, dynamic>? mechanic, Map<String, dynamic>? client) {
+    final map = _iAmClient ? mechanic : client;
+    if (map == null) return null;
+    final p = map['phone']?.toString();
+    if (p == null || p.isEmpty) return null;
+    return p;
+  }
+
+  String _effectiveKind(Map<String, dynamic> map) {
+    final raw = map['kind']?.toString() ?? map['message_type']?.toString();
+    if (raw != null && raw.isNotEmpty && raw != 'text' && raw != 'null') {
+      return raw;
+    }
+    final media = _mediaUrlFromMessage(map);
+    if (media == null || media.isEmpty) return 'text';
+    final lower = media.toLowerCase();
+    if (RegExp(r'\.(m4a|mp3|wav|ogg|aac|webm)(\?|$)').hasMatch(lower)) {
+      return 'audio';
+    }
+    if (RegExp(r'\.(jpe?g|png|gif|webp)(\?|$)').hasMatch(lower)) {
+      return 'image';
+    }
+    if (lower.contains('/chat/')) {
+      return 'image';
+    }
+    return 'image';
+  }
+
   bool _isMine(Map<String, dynamic> map) {
     final user = (map['user'] as Map?) ?? {};
     final uid = ApiService.parseIntId(user['id']);
@@ -441,17 +615,38 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
+    final bubbleMax = width * 0.78;
+    final m = _peerMechanic;
+    final c = _peerClient;
     return Scaffold(
       backgroundColor: FeuTheme.chatBackdrop,
-      appBar: FeuTheme.fireAppBar(
-        title: 'Discussion · #${widget.requestId}',
-        actions: [
-          IconButton(
-            tooltip: 'Rafraîchir',
-            onPressed: _authToken == null ? null : () => _load(),
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
+      appBar: ChatScreenHeader(
+        peerName: _peerName,
+        roleLabel: _iAmClient ? 'Ton mécanicien' : 'Client',
+        phone: _peerPhone(m, c),
+        specialty: _iAmClient && m != null ? m['mechanic_specialty']?.toString() : null,
+        avatarUrl: _iAmClient
+            ? (m != null ? m['avatar_url']?.toString() : null)
+            : (c != null ? c['avatar_url']?.toString() : null),
+        avatarCacheEpoch: Object.hash(_peerAvatarEpoch, ProfileSignals.instance.generation),
+        peerUser: _iAmClient ? m : c,
+        onRefresh: _authToken == null ? null : () => _load(),
+        onOpenProfile: () {
+          final user = _iAmClient ? m : c;
+          if (user == null) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => UserProfilePage(
+                user: Map<String, dynamic>.from(user),
+                subtitle: _iAmClient ? 'Ton mécanicien' : 'Client',
+              ),
+            ),
+          );
+        },
+        onCall: _peerPhone(m, c) == null
+            ? null
+            : () => launchTelDialer(context, _peerPhone(m, c)),
       ),
       body: Stack(
         children: [
@@ -515,252 +710,55 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
                               )
                             : ListView.builder(
                                 controller: _scroll,
-                                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                                padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
                                 itemCount: _messages.length,
                                 itemBuilder: (_, i) {
                                   final m = _messages[i];
                                   if (m is! Map) return const SizedBox.shrink();
                                   final map = Map<String, dynamic>.from(m);
-                                  final user = (map['user'] as Map?) ?? const {};
                                   final mine = _isMine(map);
                                   final body = map['body']?.toString() ?? '';
-                                  final kind = map['kind']?.toString() ?? 'text';
-                                  final mediaUrl = map['media_url']?.toString();
-                                  final author = user['name']?.toString() ?? 'Utilisateur';
+                                  final kind = _effectiveKind(map);
+                                  final mediaUrl = _mediaUrlFromMessage(map);
                                   final createdAt = map['created_at']?.toString() ?? '';
-                                  final time = createdAt.length >= 16 ? createdAt.substring(11, 16) : '';
+                                  final readAt = map['read_at']?.toString();
                                   final mid = ApiService.parseIntId(map['id']) ?? i;
                                   return Align(
                                     alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                                    child: Container(
-                                      constraints: BoxConstraints(maxWidth: width * 0.84),
-                                      margin: const EdgeInsets.only(bottom: 6),
-                                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                                      decoration: BoxDecoration(
-                                        color: mine ? FeuTheme.mineBubble : FeuTheme.theirsBubble,
-                                        borderRadius: BorderRadius.only(
-                                          topLeft: const Radius.circular(16),
-                                          topRight: const Radius.circular(16),
-                                          bottomLeft: Radius.circular(mine ? 16 : 4),
-                                          bottomRight: Radius.circular(mine ? 4 : 16),
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: FeuTheme.charcoal.withValues(alpha: mine ? 0.1 : 0.06),
-                                            blurRadius: mine ? 8 : 5,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            author,
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
-                                              color: FeuTheme.deepBlue,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          if (kind == 'image' &&
-                                              mediaUrl != null &&
-                                              mediaUrl.isNotEmpty) ...[
-                                            ClipRRect(
-                                              borderRadius: BorderRadius.circular(10),
-                                              child: ConstrainedBox(
-                                                constraints: const BoxConstraints(maxHeight: 240),
-                                                child: Image.network(
-                                                  ApiService.resolvePublicUrl(mediaUrl),
-                                                  fit: BoxFit.cover,
-                                                  width: width * 0.72,
-                                                  loadingBuilder: (c, w, p) {
-                                                    if (p == null) return w;
-                                                    return SizedBox(
-                                                      height: 120,
-                                                      child: Center(
-                                                        child: CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                          color: FeuTheme.ember.withValues(alpha: 0.8),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                  errorBuilder: (_, __, ___) => const Padding(
-                                                    padding: EdgeInsets.all(12),
-                                                    child: Icon(Icons.broken_image_outlined),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                            if (body.isNotEmpty) const SizedBox(height: 6),
-                                          ],
-                                          if (kind == 'audio') ...[
-                                            InkWell(
-                                              onTap: () => _togglePlay(mid, mediaUrl ?? ''),
-                                              borderRadius: BorderRadius.circular(10),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                                decoration: BoxDecoration(
-                                                  color: mine
-                                                      ? Colors.white.withValues(alpha: 0.55)
-                                                      : FeuTheme.paper.withValues(alpha: 0.9),
-                                                  borderRadius: BorderRadius.circular(10),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      _playingMessageId == mid
-                                                          ? Icons.stop_rounded
-                                                          : Icons.play_arrow_rounded,
-                                                      color: FeuTheme.deepBlue,
-                                                      size: 28,
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      'Message vocal',
-                                                      style: TextStyle(
-                                                        fontSize: 14,
-                                                        fontWeight: FontWeight.w600,
-                                                        color: FeuTheme.charcoal.withValues(alpha: 0.88),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                            if (body.isNotEmpty) const SizedBox(height: 6),
-                                          ],
-                                          if (body.isNotEmpty)
-                                            Text(
-                                              body,
-                                              style: TextStyle(
-                                                fontSize: 15,
-                                                height: 1.35,
-                                                color: FeuTheme.charcoal.withValues(alpha: 0.95),
-                                              ),
-                                            ),
-                                          if (time.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              time,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: mine ? Colors.black45 : Colors.black38,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
+                                    child: ChatMessageRow(
+                                      mine: mine,
+                                      body: body,
+                                      kind: kind,
+                                      timeLabel: _timeLabel(createdAt),
+                                      mediaUrl: mediaUrl,
+                                      readAt: readAt,
+                                      maxWidth: bubbleMax,
+                                      dateSeparator: _dateSeparatorForIndex(i),
+                                      isPlayingAudio: _playingMessageId == mid,
+                                      onPlayAudio: kind == 'audio'
+                                          ? () => _togglePlay(mid, mediaUrl ?? '')
+                                          : null,
                                     ),
                                   );
                                 },
                               ),
               ),
-              Material(
-                elevation: 10,
-                color: FeuTheme.paper,
-                shadowColor: FeuTheme.charcoal.withValues(alpha: 0.18),
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        IconButton(
-                          tooltip: 'Envoyer une image',
-                          onPressed: (_sending || _readOnly || _authToken == null || _sessionError != null)
-                              ? null
-                              : _pickAndSendImage,
-                          icon: Icon(Icons.add_photo_alternate_outlined,
-                              color: FeuTheme.deepBlue.withValues(alpha: 0.85)),
-                        ),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(22),
-                              border: Border.all(color: FeuTheme.ember.withValues(alpha: 0.22)),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _msgCtrl,
-                                    readOnly:
-                                        _readOnly || _authToken == null || _sessionError != null,
-                                    minLines: 1,
-                                    maxLines: 5,
-                                    style: const TextStyle(fontSize: 15),
-                                    decoration: InputDecoration(
-                                      isDense: true,
-                                      hintText: _readOnly
-                                          ? 'Lecture seule'
-                                          : (_sessionError != null
-                                              ? 'Session invalide'
-                                              : (_authToken == null ? 'Connexion…' : 'Message…')),
-                                      border: InputBorder.none,
-                                      contentPadding:
-                                          const EdgeInsets.fromLTRB(14, 12, 8, 12),
-                                    ),
-                                    onSubmitted: (_) => _sendText(),
-                                  ),
-                                ),
-                                if (!kIsWeb)
-                                  GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onLongPressStart: (_) => _onVoiceLongPressStart(),
-                                    onLongPressEnd: (_) => _onVoiceLongPressEnd(),
-                                    onLongPressCancel: () => unawaited(_cancelRecording()),
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(right: 6, bottom: 4),
-                                      child: Icon(
-                                        Icons.mic_none_rounded,
-                                        color: _recording
-                                            ? FeuTheme.ember
-                                            : FeuTheme.deepBlue.withValues(alpha: 0.75),
-                                        size: 26,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        FilledButton(
-                          onPressed: (_sending ||
-                                  _readOnly ||
-                                  _authToken == null ||
-                                  _sessionError != null)
-                              ? null
-                              : _sendText,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: FeuTheme.ember,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.all(14),
-                            shape: const CircleBorder(),
-                          ),
-                          child: _sending
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.send_rounded, size: 22),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              ChatComposerBar(
+                controller: _msgCtrl,
+                onSend: _sendText,
+                onPickGallery: () => _pickAndSendImage(source: ImageSource.gallery),
+                onPickCamera: kIsWeb ? null : () => _pickAndSendImage(source: ImageSource.camera),
+                onVoicePressStart: _onVoiceLongPressStart,
+                onVoicePressEnd: _onVoiceLongPressEnd,
+                onVoicePressCancel: () => unawaited(_cancelRecording()),
+                readOnly: _readOnly || _authToken == null || _sessionError != null,
+                sending: _sending,
+                recording: _recording,
+                hintText: _readOnly
+                    ? 'Lecture seule'
+                    : (_sessionError != null
+                        ? 'Session invalide'
+                        : (_authToken == null ? 'Connexion…' : 'Message')),
               ),
             ],
           ),
@@ -781,7 +779,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          'Enregistrement… relâche pour envoyer',
+                          'Enregistrement… relâche pour envoyer · glisse à gauche pour annuler',
                           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                       ),

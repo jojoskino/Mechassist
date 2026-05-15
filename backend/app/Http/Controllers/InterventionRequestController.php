@@ -7,6 +7,7 @@ use App\Models\MechanicRating;
 use App\Models\User;
 use App\Services\FcmService;
 use App\Services\FirestoreSyncService;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -30,8 +31,8 @@ class InterventionRequestController extends Controller
         ]);
 
         $q = InterventionRequest::query()->with([
-            'client:id,name,phone',
-            'mechanic:id,name,phone',
+            'client:id,name,phone,avatar_path,last_seen_at,last_location_at,role',
+            'mechanic:id,name,phone,mechanic_specialty,is_available,avatar_path,last_seen_at,last_location_at,role',
             'mechanicRating',
         ]);
 
@@ -102,11 +103,24 @@ class InterventionRequestController extends Controller
 
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
 
+        $clientName = $row->client?->name ?? 'Un client';
+        $vehicle = match ($row->vehicle_type) {
+            'moto' => 'Moto',
+            'voiture' => 'Voiture',
+            default => 'Véhicule',
+        };
+        $descPreview = mb_substr((string) $row->description, 0, 100);
+
         $this->fcmService->sendToToken(
             $mechanic->fcm_token,
-            'Nouvelle demande',
-            'Un client vient de vous envoyer une demande.',
-            ['type' => 'request_created', 'request_id' => (string) $row->id]
+            'Nouvelle demande · '.$clientName,
+            $vehicle.' — '.$descPreview,
+            [
+                'type' => 'request_created',
+                'request_id' => (string) $row->id,
+                'sender_name' => $clientName,
+                'message_preview' => $descPreview,
+            ]
         );
 
         $this->firestoreSync->syncInterventionRequest($row);
@@ -117,8 +131,8 @@ class InterventionRequestController extends Controller
     public function show(Request $request, int $id)
     {
         $row = InterventionRequest::query()->with([
-            'client:id,name,phone',
-            'mechanic:id,name,phone',
+            'client:id,name,phone,avatar_path,last_seen_at,last_location_at,role',
+            'mechanic:id,name,phone,mechanic_specialty,is_available,avatar_path,last_seen_at,last_location_at,role',
             'mechanicRating',
         ])->findOrFail($id);
         $this->authorizeParticipant($request->user()->id, $row);
@@ -356,9 +370,7 @@ class InterventionRequestController extends Controller
     private function transform(InterventionRequest $r): array
     {
         $data = $r->toArray();
-        $data['photo_url'] = $r->photo_path
-            ? Storage::disk('public')->url($r->photo_path)
-            : null;
+        $data['photo_url'] = PublicStorageUrl::forPath($r->photo_path);
 
         $data['rating'] = null;
         if ($r->relationLoaded('mechanicRating') && $r->mechanicRating) {

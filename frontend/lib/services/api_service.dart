@@ -58,19 +58,35 @@ class ApiService {
   }
 
   /// URL publique absolue pour un chemin renvoyé par l’API (ex. `photo_url`).
+  /// Réécrit `localhost` / `127.0.0.1` vers [serverOrigin] (ex. `10.0.2.2:8000` sur émulateur).
   static String resolvePublicUrl(String? relativeOrAbsolute) {
     if (relativeOrAbsolute == null || relativeOrAbsolute.isEmpty) {
       return '';
     }
     final s = relativeOrAbsolute.trim();
     if (s.startsWith('http://') || s.startsWith('https://')) {
-      return s;
+      return _rewriteLocalhostHost(s);
     }
     final origin = serverOrigin;
     if (s.startsWith('/')) {
       return '$origin$s';
     }
     return '$origin/$s';
+  }
+
+  static String _rewriteLocalhostHost(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final host = uri.host.toLowerCase();
+    if (host != 'localhost' && host != '127.0.0.1') {
+      return url;
+    }
+    final originUri = Uri.parse(serverOrigin);
+    return originUri.replace(
+      path: uri.path,
+      query: uri.hasQuery ? uri.query : null,
+      fragment: uri.hasFragment ? uri.fragment : null,
+    ).toString();
   }
 
   /// Identifiant entier robuste (JSON `num` / `String`).
@@ -496,6 +512,24 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode(fields),
       ));
+      return _parseBody(response);
+    } catch (e) {
+      return {'status': 0, 'message': 'Erreur réseau : $e'};
+    }
+  }
+
+  /// Photo de profil (multipart `avatar`).
+  static Future<Map<String, dynamic>> uploadProfileAvatar(
+    String token,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    try {
+      final request = http.MultipartRequest('PATCH', Uri.parse('$_apiRoot/profile'));
+      request.headers['Accept'] = 'application/json';
+      request.headers['Authorization'] = 'Bearer $token';
+      request.files.add(http.MultipartFile.fromBytes('avatar', bytes, filename: filename));
+      final response = await _twMultipart(request);
       return _parseBody(response);
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};

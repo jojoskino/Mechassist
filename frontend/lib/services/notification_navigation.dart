@@ -81,7 +81,7 @@ class NotificationNavigation {
         return;
       case 'request_completed':
       case 'mechanic_rated':
-        goDashboard();
+        goDashboard(clientTab: 2);
         return;
       default:
         goDashboard();

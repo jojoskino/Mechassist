@@ -8,11 +8,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use App\Support\PublicStorageUrl;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements CanResetPasswordContract
 {
     use CanResetPassword, HasApiTokens, HasFactory, Notifiable;
+
+    protected $appends = ['avatar_url', 'is_online'];
 
     protected $fillable = [
         'name',
@@ -27,6 +30,7 @@ class User extends Authenticatable implements CanResetPasswordContract
         'last_seen_at',
         'fcm_token',
         'mechanic_specialty',
+        'avatar_path',
     ];
 
     protected $hidden = [
@@ -73,6 +77,22 @@ class User extends Authenticatable implements CanResetPasswordContract
         $cutoff = $since !== null
             ? \Illuminate\Support\Carbon::instance(\DateTimeImmutable::createFromInterface($since))
             : now()->subMinutes(5);
+        $seen = $this->last_seen_at ?? $this->last_location_at;
+
+        return $seen !== null && $seen->gte($cutoff);
+    }
+
+    public function getAvatarUrlAttribute(): ?string
+    {
+        return PublicStorageUrl::forPath($this->avatar_path);
+    }
+
+    public function getIsOnlineAttribute(): bool
+    {
+        if ($this->role === 'mecanicien' && ! $this->is_available) {
+            return false;
+        }
+        $cutoff = now()->subMinutes(5);
         $seen = $this->last_seen_at ?? $this->last_location_at;
 
         return $seen !== null && $seen->gte($cutoff);

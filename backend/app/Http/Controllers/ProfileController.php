@@ -24,6 +24,14 @@ class ProfileController extends Controller
             $rules['mechanic_specialty'] = 'sometimes|nullable|string|max:255';
         }
 
+        if ($request->hasFile('avatar')) {
+            $request->validate([
+                'avatar' => ['required', 'image', 'max:5120', 'mimes:jpeg,jpg,png,webp'],
+            ]);
+            $path = $request->file('avatar')->store('avatars/'.$user->id, 'public');
+            $user->avatar_path = $path;
+        }
+
         $validated = $request->validate($rules);
         $user->fill($validated);
         if ($user->role === 'mecanicien' && array_key_exists('is_available', $validated) && $validated['is_available']) {

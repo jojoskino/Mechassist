@@ -22,6 +22,14 @@ class ChatMessageController extends Controller
         $row = InterventionRequest::query()->findOrFail($id);
         $this->authorizeParticipant($request->user()->id, $row);
 
+        $userId = $request->user()->id;
+
+        ChatMessage::query()
+            ->where('intervention_request_id', $row->id)
+            ->where('user_id', '!=', $userId)
+            ->whereNull('read_at')
+            ->update(['read_at' => now()]);
+
         $messages = ChatMessage::query()
             ->with('user:id,name,role')
             ->where('intervention_request_id', $row->id)
@@ -90,9 +98,15 @@ class ChatMessageController extends Controller
 
         $this->fcmService->sendToToken(
             $target?->fcm_token,
-            'Nouveau message',
-            $senderName.': '.$preview,
-            ['type' => 'chat_message', 'request_id' => (string) $row->id]
+            $senderName,
+            $preview,
+            [
+                'type' => 'chat_message',
+                'request_id' => (string) $row->id,
+                'sender_id' => (string) $request->user()->id,
+                'sender_name' => $senderName,
+                'message_preview' => $preview,
+            ]
         );
 
         $this->firestoreSync->syncChatMessage($message, $request->user());

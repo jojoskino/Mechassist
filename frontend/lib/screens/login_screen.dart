@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/google_sign_in_service.dart';
 import '../services/push_service.dart';
 import '../widgets/auth_shell.dart';
 import 'register_screen.dart';
@@ -65,21 +64,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// Après Google : enregistre l’email si « Se souvenir de moi » est coché (sans mot de passe).
-  Future<void> _persistRememberEmailFromUser(Map<String, dynamic> user) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('mechassist_saved_password');
-    if (!rememberMe) {
-      await prefs.remove('mechassist_remember_me');
-      await prefs.remove('mechassist_saved_email');
-      return;
-    }
-    final em = user['email']?.toString().trim() ?? '';
-    if (em.isEmpty) return;
-    await prefs.setBool('mechassist_remember_me', true);
-    await prefs.setString('mechassist_saved_email', em);
-  }
-
   void _syncPushTokenInBackground(String apiToken) {
     Future<void>.microtask(() async {
       try {
@@ -89,41 +73,6 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (_) {}
     });
-  }
-
-  Future<void> _googleLogin() async {
-    setState(() => isLoading = true);
-    try {
-      final idToken = await GoogleSignInService.signInForIdToken();
-      if (!mounted) return;
-      if (idToken == null) {
-        setState(() => isLoading = false);
-        return;
-      }
-      final res = await ApiService.googleLogin(idToken: idToken, fcmToken: null);
-      if (!mounted) return;
-      setState(() => isLoading = false);
-
-      if (res['status'] == 200 && res['token'] != null) {
-        final user = res['user'] as Map<String, dynamic>? ?? {};
-        final apiToken = res['token'].toString();
-        await _persistRememberEmailFromUser(user);
-        await AuthStorage.save(
-          token: apiToken,
-          role: user['role']?.toString() ?? 'client',
-          name: user['name']?.toString() ?? '',
-        );
-        if (!mounted) return;
-        _navigateByRole(user['role']?.toString() ?? 'client');
-        _syncPushTokenInBackground(apiToken);
-      } else {
-        _showSnack(res['message']?.toString() ?? 'Connexion Google impossible', isError: true);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => isLoading = false);
-      _showSnack(e.toString(), isError: true);
-    }
   }
 
   Future<void> _login() async {
@@ -271,51 +220,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: const Text('Créer un compte', style: TextStyle(fontWeight: FontWeight.w600)),
               ),
             ],
-          ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              Expanded(child: Divider(color: Colors.grey.shade300)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('ou', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-              ),
-              Expanded(child: Divider(color: Colors.grey.shade300)),
-            ],
-          ),
-          const SizedBox(height: 18),
-          OutlinedButton(
-            onPressed: isLoading ? null : _googleLogin,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF10324A),
-              minimumSize: const Size.fromHeight(52),
-              side: const BorderSide(color: accent, width: 1.2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: const Text(
-                    'G',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                      color: Color(0xFF4285F4),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Text('Se connecter avec Google', style: TextStyle(fontWeight: FontWeight.w500)),
-              ],
-            ),
           ),
         ],
       ),

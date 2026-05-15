@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Storage;
+use App\Support\PublicStorageUrl;
 
 class ChatMessage extends Model
 {
@@ -14,6 +14,7 @@ class ChatMessage extends Model
         'kind',
         'body',
         'media_path',
+        'read_at',
     ];
 
     protected $appends = ['media_url'];
@@ -23,6 +24,7 @@ class ChatMessage extends Model
         return [
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
+            'read_at' => 'datetime',
         ];
     }
 
@@ -32,7 +34,7 @@ class ChatMessage extends Model
             return null;
         }
 
-        return Storage::disk('public')->url($this->media_path);
+        return PublicStorageUrl::forPath($this->media_path);
     }
 
     public function interventionRequest(): BelongsTo

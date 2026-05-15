@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Charte « feu » (aplats uniquement, pas de dégradés) + bleu MechAssist.
 abstract final class FeuTheme {
@@ -8,11 +9,14 @@ abstract final class FeuTheme {
   static const Color deepBlue = Color(0xFF0F4C75);
   static const Color appBarSolid = Color(0xFF0F4C75);
   static const Color paper = Color(0xFFFFF5EF);
-  /// Fond discussion type messagerie (aplats, proche WhatsApp mais teinte MechAssist).
-  static const Color chatBackdrop = Color(0xFFE5DDD5);
-  /// Bulle « moi » — fond uni lisible avec texte foncé.
-  static const Color mineBubble = Color(0xFFFFE4CC);
+  /// Fond fil de discussion (blanc, comme le mockup).
+  static const Color chatBackdrop = Color(0xFFF7F8FA);
+  /// Bulles reçues.
   static const Color theirsBubble = Color(0xFFFFFFFF);
+  /// Bulles envoyées — bleu MechAssist, texte blanc.
+  static const Color mineBubble = deepBlue;
+  /// Ancienne teinte ambre (listes hors chat).
+  static const Color mineBubbleLegacy = Color(0xFFFFE4CC);
 
   static BoxDecoration cardShell({bool emberAccent = false}) => BoxDecoration(
         color: Colors.white,
@@ -41,7 +45,7 @@ abstract final class FeuTheme {
       leading: leading,
       title: Text(
         title,
-        style: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.3),
+        style: GoogleFonts.poppins(fontWeight: FontWeight.w700, letterSpacing: 0.3),
       ),
       foregroundColor: Colors.white,
       elevation: 1,

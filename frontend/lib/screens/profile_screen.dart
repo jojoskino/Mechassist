@@ -1,10 +1,17 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/profile_signals.dart';
 import '../theme/feu_theme.dart';
+import '../widgets/user_avatar.dart';
+import 'full_screen_image_page.dart';
 
-/// Compte connecté : nom, téléphone, spécialité et disponibilité (mécano). Aplats, charte feu.
+/// Compte connecté : photo, nom, téléphone, spécialité et disponibilité (mécano).
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -16,12 +23,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _specialtyCtrl = TextEditingController();
+  final _picker = ImagePicker();
   bool _loading = true;
   bool _saving = false;
+  bool _uploadingPhoto = false;
   String? _loadError;
   String _role = 'client';
   String _email = '';
+  String? _avatarUrl;
+  Uint8List? _localAvatarBytes;
+  int _avatarCacheEpoch = 0;
+  bool _profileDirty = false;
   bool _mechanicAvailable = false;
+
+  Map<String, dynamic> _popPayload() => {
+        'updated': _profileDirty,
+        'avatar_url': _avatarUrl,
+        'cache_epoch': _avatarCacheEpoch,
+      };
 
   @override
   void dispose() {
@@ -62,9 +81,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameCtrl.text = res['name']?.toString() ?? '';
     _phoneCtrl.text = res['phone']?.toString() ?? '';
     _specialtyCtrl.text = res['mechanic_specialty']?.toString() ?? '';
+    _avatarUrl = res['avatar_url']?.toString();
+    _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
     final av = res['is_available'];
     _mechanicAvailable = av is bool ? av : av == 1 || av?.toString() == '1';
     setState(() => _loading = false);
+  }
+
+  Future<void> _pickAvatar(ImageSource source) async {
+    final token = await AuthStorage.getToken();
+    if (token == null) return;
+    final x = await _picker.pickImage(source: source, maxWidth: 1200, imageQuality: 88);
+    if (x == null) return;
+    final bytes = await x.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _localAvatarBytes = bytes;
+      _uploadingPhoto = true;
+    });
+    final name = x.name.isNotEmpty ? x.name : 'avatar.jpg';
+    final res = await ApiService.uploadProfileAvatar(token, bytes, name);
+    if (!mounted) return;
+    final code = res['status'] as int?;
+    final ok = code != null && code >= 200 && code < 300;
+    if (!ok) {
+      setState(() => _uploadingPhoto = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message']?.toString() ?? 'Photo impossible')),
+      );
+      return;
+    }
+    setState(() {
+      _uploadingPhoto = false;
+      _avatarUrl = res['avatar_url']?.toString();
+      _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+      _profileDirty = true;
+    });
+    ProfileSignals.instance.notifyProfilesChanged();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Photo de profil mise à jour.')),
+    );
+  }
+
+  void _showPhotoOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text('Galerie', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickAvatar(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text('Appareil photo', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickAvatar(ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -104,15 +192,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Profil enregistré.')),
     );
-    Navigator.pop(context, true);
+    setState(() => _profileDirty = true);
+    ProfileSignals.instance.notifyProfilesChanged();
+    Navigator.pop(context, _popPayload());
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        Navigator.of(context).pop(_popPayload());
+      },
+      child: Scaffold(
       backgroundColor: FeuTheme.paper,
       appBar: FeuTheme.fireAppBar(
-        title: 'Mon profil',
+        title: 'Mon compte',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+          onPressed: () => Navigator.pop(context, _popPayload()),
+        ),
+        automaticallyImplyLeading: false,
         actions: [
           if (!_loading && _loadError == null)
             TextButton(
@@ -137,105 +238,104 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
                   children: [
-                    Text(
-                      'Compte',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: FeuTheme.charcoal.withValues(alpha: 0.55),
-                        letterSpacing: 0.6,
+                    Center(
+                      child: Stack(
+                        children: [
+                          UserAvatar(
+                            name: _nameCtrl.text.isEmpty ? 'M' : _nameCtrl.text,
+                            avatarUrl: _avatarUrl,
+                            memoryBytes: _localAvatarBytes,
+                            cacheEpoch: _avatarCacheEpoch,
+                            radius: 52,
+                            onTap: (_avatarUrl != null && _avatarUrl!.isNotEmpty) || _localAvatarBytes != null
+                                ? () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => FullScreenImagePage(
+                                          imageUrl: _avatarUrl!,
+                                          title: _nameCtrl.text,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                : null,
+                          ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Material(
+                              color: FeuTheme.ember,
+                              shape: const CircleBorder(),
+                              child: IconButton(
+                                onPressed: _uploadingPhoto ? null : _showPhotoOptions,
+                                icon: _uploadingPhoto
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      )
+                                    : const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 22),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Card(
-                      elevation: 0,
-                      color: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: FeuTheme.ember.withValues(alpha: 0.14)),
+                    Center(
+                      child: Text(
+                        'Appuie sur l’appareil photo pour changer ta photo',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text('E-mail', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                            const SizedBox(height: 4),
-                            Text(_email, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                            const SizedBox(height: 6),
-                            Text(
-                              'L’e-mail ne peut pas être modifié ici.',
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                            ),
-                          ],
+                    ),
+                    const SizedBox(height: 24),
+                    TextField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nom affiché',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Téléphone',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      enabled: false,
+                      controller: TextEditingController(text: _email),
+                      decoration: const InputDecoration(
+                        labelText: 'E-mail',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (_role == 'mecanicien') ...[
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _specialtyCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Spécialités',
+                          border: OutlineInputBorder(),
                         ),
+                        maxLines: 2,
                       ),
-                    ),
-                    const SizedBox(height: 22),
-                    Text(
-                      'Informations',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: FeuTheme.charcoal.withValues(alpha: 0.55),
-                        letterSpacing: 0.6,
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Disponible pour les clients'),
+                        subtitle: const Text('Tu apparais sur la carte uniquement si tu es connecté et disponible.'),
+                        value: _mechanicAvailable,
+                        onChanged: (v) => setState(() => _mechanicAvailable = v),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Card(
-                      elevation: 0,
-                      color: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: FeuTheme.ember.withValues(alpha: 0.14)),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                        child: Column(
-                          children: [
-                            TextField(
-                              controller: _nameCtrl,
-                              decoration: const InputDecoration(
-                                labelText: 'Nom affiché',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            TextField(
-                              controller: _phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Téléphone',
-                                border: OutlineInputBorder(),
-                                hintText: '+33…',
-                              ),
-                            ),
-                            if (_role == 'mecanicien') ...[
-                              const SizedBox(height: 14),
-                              TextField(
-                                controller: _specialtyCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: 'Spécialités (mécanicien)',
-                                  border: OutlineInputBorder(),
-                                  hintText: 'Ex. moteur, batterie…',
-                                ),
-                                maxLines: 2,
-                              ),
-                              const SizedBox(height: 8),
-                              SwitchListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: const Text('Visible comme disponible'),
-                                subtitle: const Text('Les clients te voient sur la carte quand c’est activé.'),
-                                value: _mechanicAvailable,
-                                onChanged: (v) => setState(() => _mechanicAvailable = v),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
+                    ],
                     const SizedBox(height: 28),
                     FilledButton(
                       onPressed: _saving ? null : _save,
@@ -243,16 +343,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         backgroundColor: FeuTheme.deepBlue,
                         minimumSize: const Size.fromHeight(52),
                       ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text('Enregistrer les modifications'),
+                      child: const Text('Enregistrer les modifications'),
                     ),
                   ],
                 ),
+      ),
     );
   }
 }

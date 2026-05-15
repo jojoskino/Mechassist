@@ -1,51 +1,24 @@
-import 'dart:convert';
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
+import 'app_notification_hub.dart';
 import 'auth_storage.dart';
 import 'firebase_bootstrap.dart';
 import 'notification_navigation.dart';
+import 'push_notification_display.dart';
 
-/// FCM sur Android : permission, token, notifications en premier plan (canal local).
+/// FCM : permission, token, notifications instantanées (premier plan + canal Android).
 class PushService {
-  static final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
   static bool _handlersBound = false;
-  static bool _localReady = false;
-
-  static const AndroidNotificationChannel _androidChannel = AndroidNotificationChannel(
-    'mechassist_high',
-    'MechAssist',
-    description: 'Demandes et messages',
-    importance: Importance.high,
-  );
-
-  static Future<void> _ensureLocalNotifications() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      return;
-    }
-    if (_localReady) {
-      return;
-    }
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _local.initialize(
-      const InitializationSettings(android: androidInit),
-      onDidReceiveNotificationResponse: _onNotificationTap,
-    );
-    await _local
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_androidChannel);
-    _localReady = true;
-  }
 
   static void _onNotificationTap(NotificationResponse response) {
     NotificationNavigation.handlePayloadString(response.payload);
   }
 
   static Future<void> _bindListenersOnce() async {
-    if (_handlersBound || kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    if (_handlersBound || kIsWeb) {
       return;
     }
     if (!FirebaseBootstrap.initialized) {
@@ -54,32 +27,9 @@ class PushService {
     _handlersBound = true;
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      await _ensureLocalNotifications();
-      final n = message.notification;
-      final title = n?.title ?? 'MechAssist';
-      final body = n?.body ?? message.data['body']?.toString() ?? 'Nouvelle alerte';
-      try {
-        await _local.show(
-          message.hashCode.abs(),
-          title,
-          body,
-          NotificationDetails(
-            android: AndroidNotificationDetails(
-              _androidChannel.id,
-              _androidChannel.name,
-              channelDescription: _androidChannel.description,
-              importance: Importance.high,
-              priority: Priority.high,
-              icon: '@mipmap/ic_launcher',
-            ),
-          ),
-          payload: jsonEncode(message.data),
-        );
-      } catch (e, st) {
-        assert(() {
-          debugPrint('Notification locale: $e $st');
-          return true;
-        }());
+      AppNotificationHub.instance.ingestRemoteMessage(message);
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await PushNotificationDisplay.showFromRemoteMessage(message);
       }
     });
 
@@ -91,23 +41,34 @@ class PushService {
     });
   }
 
-  /// À appeler après connexion ou au démarrage si session valide : enregistre les listeners et retourne le jeton FCM.
+  /// Après connexion ou au démarrage : listeners + jeton FCM.
   static Future<String?> initAndGetToken() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    if (kIsWeb) {
       return null;
     }
     await FirebaseBootstrap.init();
     if (!FirebaseBootstrap.initialized) {
       return null;
     }
-    await _ensureLocalNotifications();
+
+    PushNotificationDisplay.onTap = _onNotificationTap;
+    await PushNotificationDisplay.ensureInitialized();
+
     final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission();
-    await messaging.setForegroundNotificationPresentationOptions(
+    await messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
+      provisional: false,
     );
+    await PushNotificationDisplay.requestAndroidPostNotifications();
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    }
     await _bindListenersOnce();
     return messaging.getToken();
   }

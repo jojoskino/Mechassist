@@ -46,7 +46,7 @@ class MechanicSearchController extends Controller
                         ->where('last_location_at', '>=', $onlineBefore);
                 });
             })
-            ->get(['id', 'name', 'phone', 'mechanic_specialty', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at']);
+            ->get(['id', 'name', 'phone', 'mechanic_specialty', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at', 'avatar_path', 'role']);
 
         $withDistance = $mechanics->map(function (User $u) use ($lat, $lng, $onlineBefore) {
             $km = self::haversineKm($lat, $lng, (float) $u->latitude, (float) $u->longitude);

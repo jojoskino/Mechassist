@@ -1,24 +1,39 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Session : jeton API chiffré (secure storage), rôle/nom en préférences.
 class AuthStorage {
   static const _tokenKey = 'auth_token';
   static const _roleKey = 'user_role';
   static const _nameKey = 'user_name';
+  static const _legacyTokenKey = 'auth_token';
+
+  static const FlutterSecureStorage _secure = FlutterSecureStorage();
 
   static Future<void> save({
     required String token,
     required String role,
     required String name,
   }) async {
+    await _secure.write(key: _tokenKey, value: token);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
     await prefs.setString(_roleKey, role);
     await prefs.setString(_nameKey, name);
+    await prefs.remove(_legacyTokenKey);
   }
 
   static Future<String?> getToken() async {
+    var token = await _secure.read(key: _tokenKey);
+    if (token != null && token.isNotEmpty) {
+      return token;
+    }
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
+    token = prefs.getString(_legacyTokenKey);
+    if (token != null && token.isNotEmpty) {
+      await _secure.write(key: _tokenKey, value: token);
+      await prefs.remove(_legacyTokenKey);
+    }
+    return token;
   }
 
   static Future<String?> getRole() async {
@@ -37,8 +52,9 @@ class AuthStorage {
   }
 
   static Future<void> clear() async {
+    await _secure.delete(key: _tokenKey);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
+    await prefs.remove(_legacyTokenKey);
     await prefs.remove(_roleKey);
     await prefs.remove(_nameKey);
   }
@@ -48,11 +64,10 @@ class AuthStorage {
     return token != null && token.isNotEmpty;
   }
 
-  /// Une seule ouverture SharedPreferences (plus rapide que trois appels séparés).
   static Future<Map<String, String?>> getSessionFields() async {
     final prefs = await SharedPreferences.getInstance();
     return {
-      'token': prefs.getString(_tokenKey),
+      'token': await getToken(),
       'role': prefs.getString(_roleKey),
       'name': prefs.getString(_nameKey),
     };
