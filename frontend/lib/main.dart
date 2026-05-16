@@ -17,6 +17,7 @@ import 'screens/forgot_password_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/intervention_chat_screen.dart';
 import 'screens/profile_screen.dart';
+import 'theme/app_fonts.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -24,6 +25,7 @@ void main() async {
   if (!kIsWeb) {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
+  await AppFonts.ensureLoaded();
   await ApiConfig.load();
   await ApiConfig.ensureMobileProductionDefault();
   await FirebaseBootstrap.init();
@@ -59,6 +61,14 @@ class _MechAssistAppState extends State<MechAssistApp> {
       debugShowCheckedModeBanner: false,
       title: 'MechAssist',
       theme: AppTheme.light(),
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.15),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),

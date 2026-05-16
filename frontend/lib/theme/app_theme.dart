@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
+import 'app_fonts.dart';
 import 'feu_theme.dart';
 
-/// Thème global MechAssist — police Poppins partout.
+/// Thème global MechAssist — Poppins embarquée (fluide, hors ligne).
 abstract final class AppTheme {
   static ThemeData light() {
     final base = ThemeData(
       useMaterial3: true,
+      fontFamily: AppFonts.family,
       scaffoldBackgroundColor: Colors.white,
       colorScheme: ColorScheme.fromSeed(
         seedColor: FeuTheme.deepBlue,
         primary: FeuTheme.deepBlue,
         secondary: FeuTheme.ember,
+      ),
+      iconTheme: const IconThemeData(
+        color: FeuTheme.deepBlue,
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith((states) {
@@ -23,12 +27,12 @@ abstract final class AppTheme {
         }),
       ),
     );
-    final poppins = GoogleFonts.poppinsTextTheme(base.textTheme);
+    final text = AppFonts.textTheme(base.textTheme);
     return base.copyWith(
-      textTheme: poppins,
-      primaryTextTheme: poppins,
+      textTheme: text,
+      primaryTextTheme: text,
       appBarTheme: AppBarTheme(
-        titleTextStyle: GoogleFonts.poppins(
+        titleTextStyle: AppFonts.style(
           fontSize: 18,
           fontWeight: FontWeight.w700,
           color: Colors.white,
@@ -38,7 +42,7 @@ abstract final class AppTheme {
         filled: true,
         fillColor: const Color(0xFFF5F6FA),
         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        hintStyle: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
+        hintStyle: AppFonts.style(color: Colors.grey, fontSize: 15),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(26),
           borderSide: BorderSide(color: Colors.grey.shade300),
@@ -56,18 +60,26 @@ abstract final class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: FeuTheme.deepBlue,
           foregroundColor: Colors.white,
-          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
+          textStyle: AppFonts.style(fontWeight: FontWeight.w600, fontSize: 15),
           minimumSize: const Size(double.infinity, 50),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+          textStyle: AppFonts.style(fontWeight: FontWeight.w600),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        contentTextStyle: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+        contentTextStyle: AppFonts.style(color: Colors.white, fontSize: 14),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          return AppFonts.style(
+            fontSize: 11,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+          );
+        }),
       ),
     );
   }

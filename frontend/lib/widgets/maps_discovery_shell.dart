@@ -170,7 +170,7 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
 
     return Stack(
       children: [
-        Positioned.fill(child: widget.map),
+        Positioned.fill(child: RepaintBoundary(child: widget.map)),
         if (widget.loading)
           const Positioned.fill(
             child: ColoredBox(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'app_fonts.dart';
 
 /// Charte « feu » (aplats uniquement, pas de dégradés) + bleu MechAssist.
 abstract final class FeuTheme {
@@ -57,7 +57,7 @@ abstract final class FeuTheme {
       leading: leading,
       title: Text(
         title,
-        style: GoogleFonts.poppins(fontWeight: FontWeight.w700, letterSpacing: 0.3),
+        style: AppFonts.style(fontWeight: FontWeight.w700, letterSpacing: 0.3),
       ),
       foregroundColor: Colors.white,
       elevation: 1,

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-
+import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
 
 enum MechAssistNavVariant { client, mechanic }
@@ -38,7 +37,8 @@ class MechAssistBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return RepaintBoundary(
+      child: Container(
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: FeuTheme.charcoal.withValues(alpha: 0.08))),
@@ -64,7 +64,8 @@ class MechAssistBottomNav extends StatelessWidget {
                   onTap: () => onTap(i),
                   borderRadius: BorderRadius.circular(20),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                     decoration: BoxDecoration(
                       color: selected ? FeuTheme.deepBlue : Colors.transparent,
@@ -75,18 +76,18 @@ class MechAssistBottomNav extends StatelessWidget {
                       children: [
                         Badge(
                           isLabelVisible: badge > 0,
-                          label: Text(badge > 99 ? '99+' : '$badge'),
+                          label: Text(badge > 99 ? '99+' : '$badge', style: AppFonts.style(fontSize: 10)),
                           backgroundColor: Colors.red.shade600,
                           child: Icon(
                             selected ? item.$2 : item.$1,
-                            size: 22,
+                            size: 24,
                             color: selected ? Colors.white : Colors.grey.shade600,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           item.$3,
-                          style: GoogleFonts.poppins(
+                          style: AppFonts.style(
                             fontSize: 11,
                             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                             color: selected ? Colors.white : Colors.grey.shade600,
@@ -101,6 +102,7 @@ class MechAssistBottomNav extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 }

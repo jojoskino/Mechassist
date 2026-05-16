@@ -29,6 +29,9 @@ class MechAssistLogoBadge extends StatelessWidget {
           child: Image.asset(
             _assetPath,
             fit: BoxFit.contain,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+            cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
             errorBuilder: (_, __, ___) => Icon(
               Icons.miscellaneous_services_rounded,
               size: size * 0.48,
@@ -64,6 +67,9 @@ class MechAssistLogoChip extends StatelessWidget {
           child: Image.asset(
             _assetPath,
             fit: BoxFit.contain,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+            cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
             errorBuilder: (_, __, ___) => Icon(
               Icons.local_fire_department_rounded,
               color: const Color(0xFF0F4C75),
