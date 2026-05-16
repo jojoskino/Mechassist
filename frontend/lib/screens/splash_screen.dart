@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/push_service.dart';
+import '../services/push_sync.dart';
+import 'welcome_screen.dart';
 import '../widgets/mechassist_logo.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -26,7 +27,9 @@ class _SplashScreenState extends State<SplashScreen> {
     final token = session['token'];
     if (token == null || token.isEmpty) {
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/welcome');
+      final onboarded = await WelcomeScreen.isOnboardingComplete();
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, onboarded ? '/login' : '/welcome');
       return;
     }
 
@@ -44,14 +47,7 @@ class _SplashScreenState extends State<SplashScreen> {
       context,
       role == 'mecanicien' ? '/mecanicien' : '/client',
     );
-    Future<void>.microtask(() async {
-      try {
-        final fcm = await PushService.initAndGetToken();
-        if (fcm != null && fcm.isNotEmpty) {
-          await ApiService.updatePushToken(token, fcm);
-        }
-      } catch (_) {}
-    });
+    Future<void>.microtask(() => PushSync.syncToken());
   }
 
   @override

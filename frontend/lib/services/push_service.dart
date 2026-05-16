@@ -2,9 +2,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-import 'api_service.dart';
 import 'app_notification_hub.dart';
-import 'auth_storage.dart';
+import 'push_sync.dart';
 import 'firebase_bootstrap.dart';
 import 'notification_navigation.dart';
 import 'push_notification_display.dart';
@@ -33,11 +32,8 @@ class PushService {
       }
     });
 
-    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-      final auth = await AuthStorage.getToken();
-      if (auth != null) {
-        await ApiService.updatePushToken(auth, newToken);
-      }
+    FirebaseMessaging.instance.onTokenRefresh.listen((_) async {
+      await PushSync.syncToken();
     });
   }
 

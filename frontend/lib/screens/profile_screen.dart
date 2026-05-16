@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/profile_signals.dart';
+import '../services/push_preferences.dart';
+import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
 import '../widgets/user_avatar.dart';
 import '../widgets/mechassist_section_card.dart';
@@ -35,6 +38,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _avatarCacheEpoch = 0;
   bool _profileDirty = false;
   bool _mechanicAvailable = false;
+  bool _pushEnabled = true;
 
   Map<String, dynamic> _popPayload() => {
         'updated': _profileDirty,
@@ -85,7 +89,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
     final av = res['is_available'];
     _mechanicAvailable = av is bool ? av : av == 1 || av?.toString() == '1';
+    _pushEnabled = await PushPreferences.isEnabled();
     setState(() => _loading = false);
+  }
+
+  Future<void> _setPushEnabled(bool enabled) async {
+    setState(() => _pushEnabled = enabled);
+    await PushPreferences.setEnabled(enabled);
+    await PushSync.syncToken();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(enabled ? 'Notifications push activées' : 'Notifications push désactivées'),
+      ),
+    );
   }
 
   Future<void> _pickAvatar(ImageSource source) async {
@@ -358,8 +375,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         SwitchListTile(
                           secondary: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
                           title: Text('Notifications push', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                          value: true,
-                          onChanged: null,
+                          subtitle: const Text('Alertes demandes et messages'),
+                          value: _pushEnabled,
+                          activeTrackColor: FeuTheme.deepBlue,
+                          onChanged: kIsWeb ? null : (v) => _setPushEnabled(v),
                         ),
                       ],
                     ),

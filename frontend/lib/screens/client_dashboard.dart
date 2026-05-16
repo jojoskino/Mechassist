@@ -8,7 +8,7 @@ import '../services/api_service.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/app_notification_hub.dart';
 import '../services/profile_signals.dart';
-import '../services/push_service.dart';
+import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
 import '../utils/list_search.dart';
@@ -32,6 +32,7 @@ import '../widgets/client_home_help_panel.dart';
 import '../widgets/rate_mechanic_sheet.dart';
 import '../utils/recent_addresses.dart';
 import '../screens/help_screen.dart';
+import '../screens/full_screen_image_page.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key, this.initialTabIndex = 0});
@@ -140,16 +141,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Future<void> _syncPush() async {
-    Future<void>.microtask(() async {
-      try {
-        final token = await AuthStorage.getToken();
-        if (token == null) return;
-        final fcm = await PushService.initAndGetToken();
-        if (fcm != null && fcm.isNotEmpty) {
-          await ApiService.updatePushToken(token, fcm);
-        }
-      } catch (_) {}
-    });
+    Future<void>.microtask(() => PushSync.syncToken());
   }
 
   /// Liste issue uniquement de l’API (PostgreSQL) — rafraîchie au pull, au timer et au GPS.
@@ -1328,12 +1320,26 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
               ],
               if (r['photo_url'] != null && r['photo_url'].toString().trim().isNotEmpty) ...[
                 const SizedBox(height: 12),
-                PublicNetworkImage(
-                  url: r['photo_url'].toString(),
-                  width: double.infinity,
-                  height: 160,
-                  borderRadius: BorderRadius.circular(8),
-                  icon: Icons.broken_image_outlined,
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push<void>(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => FullScreenImagePage(
+                          imageUrl: r['photo_url'].toString(),
+                          title: 'Photo de la panne',
+                        ),
+                      ),
+                    );
+                  },
+                  child: PublicNetworkImage(
+                    url: r['photo_url'].toString(),
+                    width: double.infinity,
+                    height: 160,
+                    borderRadius: BorderRadius.circular(8),
+                    icon: Icons.broken_image_outlined,
+                  ),
                 ),
               ],
             ],

@@ -5,7 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
 import '../services/google_sign_in_service.dart';
-import '../services/push_service.dart';
+import '../services/push_sync.dart';
+import '../screens/full_screen_image_page.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
 import '../utils/list_search.dart';
@@ -185,16 +186,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   }
 
   Future<void> _syncPush() async {
-    Future<void>.microtask(() async {
-      try {
-        final token = await AuthStorage.getToken();
-        if (token == null) return;
-        final fcm = await PushService.initAndGetToken();
-        if (fcm != null && fcm.isNotEmpty) {
-          await ApiService.updatePushToken(token, fcm);
-        }
-      } catch (_) {}
-    });
+    Future<void>.microtask(() => PushSync.syncToken());
   }
 
   void _onNotificationsChanged() {
@@ -683,6 +675,127 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     );
   }
 
+  void _openRequestPhoto(String url, {String? title}) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => FullScreenImagePage(imageUrl: url, title: title ?? 'Photo de la panne'),
+      ),
+    );
+  }
+
+  void _showMechanicRequestDetail(Map<String, dynamic> r) {
+    final status = (r['status'] ?? '').toString().trim();
+    final id = ApiService.parseIntId(r['id']);
+    final rawPhoto = r['photo_url']?.toString();
+    final hasPhoto = rawPhoto != null && rawPhoto.trim().isNotEmpty;
+    final client = r['client'];
+    String? clientPhone;
+    if (client is Map) {
+      clientPhone = client['phone']?.toString();
+    }
+    final canDial = normalizePhoneForDial(clientPhone) != null;
+    final canAct = status == 'pending';
+    final canMarkDone = status == 'accepted' &&
+        (r['mechanic_completed_at'] == null ||
+            r['mechanic_completed_at'].toString().trim().isEmpty ||
+            r['mechanic_completed_at'].toString() == 'null');
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Demande #${id ?? '—'}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (client is Map)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: UserAvatar(
+                    name: client['name']?.toString() ?? 'C',
+                    avatarUrl: client['avatar_url']?.toString(),
+                    cacheEpoch: _clientAvatarCacheEpoch,
+                    radius: 24,
+                  ),
+                  title: Text(client['name']?.toString() ?? 'Client'),
+                  subtitle: Text(client['phone']?.toString() ?? ''),
+                ),
+              Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
+              const SizedBox(height: 6),
+              Text('Statut : $status'),
+              const SizedBox(height: 8),
+              Text(r['description']?.toString() ?? ''),
+              if (hasPhoto) ...[
+                const SizedBox(height: 12),
+                Text('Photo de la panne', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openRequestPhoto(rawPhoto);
+                  },
+                  child: PublicNetworkImage(
+                    url: rawPhoto,
+                    width: double.infinity,
+                    height: 200,
+                    borderRadius: BorderRadius.circular(12),
+                    icon: Icons.broken_image_outlined,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _openRequestPhoto(rawPhoto);
+                  },
+                  icon: const Icon(Icons.zoom_in_rounded),
+                  label: const Text('Agrandir la photo'),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
+          if (canDial && (status == 'pending' || status == 'accepted'))
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                launchTelDialer(context, clientPhone);
+              },
+              icon: const Icon(Icons.call_rounded),
+              label: const Text('Appeler'),
+            ),
+          if (canAct && id != null)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _processRequest(id, true, r);
+              },
+              child: const Text('Accepter'),
+            ),
+          if (status == 'accepted' && id != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openChat(id);
+              },
+              child: const Text('Chat'),
+            ),
+          if (canMarkDone && id != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _markMechanicComplete(id);
+              },
+              child: const Text('Terminée'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMechanicRequestCard(Map<String, dynamic> r) {
     final status = (r['status'] ?? '').toString().trim();
     final canAct = status == 'pending';
@@ -717,11 +830,28 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (hasPhoto)
-                  PublicNetworkImage(
-                    url: rawPhoto,
-                    width: 52,
-                    height: 52,
-                    borderRadius: BorderRadius.circular(8),
+                  GestureDetector(
+                    onTap: () => _openRequestPhoto(rawPhoto),
+                    child: Stack(
+                      children: [
+                        PublicNetworkImage(
+                          url: rawPhoto,
+                          width: 72,
+                          height: 72,
+                          borderRadius: BorderRadius.circular(10),
+                          icon: Icons.broken_image_outlined,
+                        ),
+                        Positioned(
+                          right: 2,
+                          bottom: 2,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                            child: const Icon(Icons.zoom_in_rounded, color: Colors.white, size: 14),
+                          ),
+                        ),
+                      ],
+                    ),
                   )
                 else if (client is Map)
                   UserAvatar(
@@ -760,6 +890,18 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
                       Text(
                         '${r['description']?.toString() ?? ''}${extra.isEmpty ? '' : '\n$extra'}',
                         style: TextStyle(fontSize: 13.5, height: 1.35, color: Colors.grey.shade800),
+                      ),
+                      TextButton(
+                        onPressed: () => _showMechanicRequestDetail(r),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          hasPhoto ? 'Voir détail et photo' : 'Voir le détail',
+                          style: const TextStyle(fontWeight: FontWeight.w600, color: FeuTheme.deepBlue),
+                        ),
                       ),
                     ],
                   ),

@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/push_service.dart';
+import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
 import 'register_screen.dart';
 
@@ -65,14 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _syncPushTokenInBackground(String apiToken) {
-    Future<void>.microtask(() async {
-      try {
-        final fcm = await PushService.initAndGetToken();
-        if (fcm != null && fcm.isNotEmpty) {
-          await ApiService.updatePushToken(apiToken, fcm);
-        }
-      } catch (_) {}
-    });
+    Future<void>.microtask(() => PushSync.syncToken());
   }
 
   Future<void> _login() async {

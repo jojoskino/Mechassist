@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/google_sign_in_service.dart';
-import '../services/push_service.dart';
+import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -41,14 +41,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   /// FCM peut prendre plusieurs secondes : ne bloque pas l’auth ; le tableau de bord rappelle aussi `updatePushToken`.
   void _syncPushTokenInBackground(String apiToken) {
-    Future<void>.microtask(() async {
-      try {
-        final fcm = await PushService.initAndGetToken();
-        if (fcm != null && fcm.isNotEmpty) {
-          await ApiService.updatePushToken(apiToken, fcm);
-        }
-      } catch (_) {}
-    });
+    Future<void>.microtask(() => PushSync.syncToken());
   }
 
   Future<void> _googleRegister() async {

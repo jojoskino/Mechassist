@@ -548,8 +548,26 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                const ColoredBox(color: Color(0xFFE8ECEF)),
-                Center(child: Icon(Icons.image_rounded, color: Colors.grey.shade600, size: 32)),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: FutureBuilder<Uint8List>(
+                    future: _photo!.readAsBytes(),
+                    builder: (context, snap) {
+                      if (!snap.hasData) {
+                        return const ColoredBox(
+                          color: Color(0xFFE8ECEF),
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      return Image.memory(
+                        snap.data!,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                      );
+                    },
+                  ),
+                ),
                 Positioned(
                   top: 4,
                   right: 4,
