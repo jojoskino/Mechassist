@@ -33,7 +33,7 @@ Optionnel : `ASSET_URL` = même URL que `APP_URL` (photos `/storage/...`).
 - **Root Directory** : `backend`
 - **Dockerfile Path** : `Dockerfile` (défaut)
 - **Port** : Render définit `PORT` (souvent `10000`) — le script d’entrée l’utilise automatiquement.
-- **Health Check Path** : `/api/health`
+- **Health Check Path** : `/api/health` (ou `/up` si l’image n’est pas encore à jour)
 
 ## Vérifications après déploiement
 
@@ -43,6 +43,9 @@ curl https://VOTRE-SERVICE.onrender.com/api/health
 
 curl https://VOTRE-SERVICE.onrender.com/api/health/ready
 # {"status":"ok","database":"connected"}
+
+curl https://VOTRE-SERVICE.onrender.com/api/db-test
+# {"status":"DB OK"} ou {"status":"DB FAIL","error":"..."}
 
 curl https://VOTRE-SERVICE.onrender.com/api/client-config
 # JSON (clés publiques, pas d'erreur 500)

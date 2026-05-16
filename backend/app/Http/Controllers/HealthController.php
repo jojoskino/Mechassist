@@ -16,7 +16,7 @@ class HealthController
     }
 
     /**
-     * Optional readiness: vérifie la base PostgreSQL.
+     * Readiness: vérifie la base PostgreSQL.
      */
     public function ready(): JsonResponse
     {
@@ -29,6 +29,23 @@ class HealthController
                 ['status' => 'error', 'database' => 'unavailable'],
                 503
             );
+        }
+    }
+
+    /**
+     * Diagnostic PostgreSQL (Supabase / Render).
+     */
+    public function dbTest(): JsonResponse
+    {
+        try {
+            DB::connection()->getPdo();
+
+            return response()->json(['status' => 'DB OK']);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'DB FAIL',
+                'error' => $e->getMessage(),
+            ], 503);
         }
     }
 }

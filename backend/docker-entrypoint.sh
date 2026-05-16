@@ -32,6 +32,12 @@ php artisan route:cache
 php artisan view:cache
 php artisan optimize
 
+if ! php artisan route:list --path=api/health 2>/dev/null | grep -q 'api/health'; then
+  echo "[mechassist] ERROR: /api/health missing after route:cache — aborting boot"
+  php artisan route:list --path=api 2>/dev/null || true
+  exit 1
+fi
+
 PORT="${PORT:-10000}"
 echo "[mechassist] Listening on 0.0.0.0:${PORT}"
 exec php artisan serve --host=0.0.0.0 --port="${PORT}"

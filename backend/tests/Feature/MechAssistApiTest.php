@@ -19,6 +19,13 @@ class MechAssistApiTest extends TestCase
             ->assertExactJson(['status' => 'ok']);
     }
 
+    public function test_db_test_endpoint_returns_db_ok(): void
+    {
+        $this->getJson('/api/db-test')
+            ->assertOk()
+            ->assertExactJson(['status' => 'DB OK']);
+    }
+
     public function test_login_returns_token_for_valid_credentials(): void
     {
         User::factory()->create([
