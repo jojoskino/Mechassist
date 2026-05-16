@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\HealthController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\InterventionRequestController;
@@ -10,6 +11,16 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ChatMessageController;
 use App\Http\Controllers\PushTokenController;
 use App\Http\Controllers\PresenceController;
+
+
+Route::get('/db-test', function () {
+    return DB::connection()->getPdo() ? 'DB OK' : 'DB FAIL';
+});
+
+
+
+Route::get('/health', HealthController::class);
+Route::get('/health/ready', [HealthController::class, 'ready']);
 
 Route::middleware(['throttle:mechassist-auth'])->group(function () {
     Route::post('/register', [AuthController::class, 'register']);

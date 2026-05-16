@@ -9,7 +9,7 @@ import '../services/auth_storage.dart';
 import '../services/profile_signals.dart';
 import '../theme/feu_theme.dart';
 import '../widgets/user_avatar.dart';
-import 'full_screen_image_page.dart';
+import '../widgets/mechassist_section_card.dart';
 
 /// Compte connecté : photo, nom, téléphone, spécialité et disponibilité (mécano).
 class ProfileScreen extends StatefulWidget {
@@ -155,6 +155,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _editField(
+    BuildContext context,
+    String label,
+    TextEditingController ctrl, {
+    TextInputType? keyboard,
+    int maxLines = 1,
+  }) async {
+    final local = TextEditingController(text: ctrl.text);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label, style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: local,
+          keyboardType: keyboard,
+          maxLines: maxLines,
+          autofocus: true,
+          decoration: InputDecoration(border: const OutlineInputBorder(), labelText: label),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('OK')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      ctrl.text = local.text;
+      setState(() {});
+    }
+    local.dispose();
+  }
+
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -206,9 +238,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Navigator.of(context).pop(_popPayload());
       },
       child: Scaffold(
-      backgroundColor: FeuTheme.paper,
+      backgroundColor: FeuTheme.pageGrey,
       appBar: FeuTheme.fireAppBar(
-        title: 'Mon compte',
+        title: 'Paramètres & profil',
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
           onPressed: () => Navigator.pop(context, _popPayload()),
@@ -238,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                   children: [
                     Center(
                       child: Stack(
@@ -249,25 +281,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             memoryBytes: _localAvatarBytes,
                             cacheEpoch: _avatarCacheEpoch,
                             radius: 52,
-                            onTap: (_avatarUrl != null && _avatarUrl!.isNotEmpty) || _localAvatarBytes != null
-                                ? () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => FullScreenImagePage(
-                                          imageUrl: _avatarUrl!,
-                                          title: _nameCtrl.text,
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                : null,
                           ),
                           Positioned(
                             right: 0,
                             bottom: 0,
                             child: Material(
-                              color: FeuTheme.ember,
+                              color: FeuTheme.deepBlue,
                               shape: const CircleBorder(),
                               child: IconButton(
                                 onPressed: _uploadingPhoto ? null : _showPhotoOptions,
@@ -277,71 +296,80 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         height: 20,
                                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                       )
-                                    : const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 22),
+                                    : const Icon(Icons.edit_rounded, color: Colors.white, size: 20),
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Center(
                       child: Text(
-                        'Appuie sur l’appareil photo pour changer ta photo',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700),
+                        _nameCtrl.text.isEmpty ? 'Profil' : _nameCtrl.text,
+                        style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    Center(
+                      child: Text(
+                        'Utilisateur MechAssist',
+                        style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
                       ),
                     ),
                     const SizedBox(height: 24),
-                    TextField(
-                      controller: _nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nom affiché',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _phoneCtrl,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: 'Téléphone',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      enabled: false,
-                      controller: TextEditingController(text: _email),
-                      decoration: const InputDecoration(
-                        labelText: 'E-mail',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    if (_role == 'mecanicien') ...[
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _specialtyCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Spécialités',
-                          border: OutlineInputBorder(),
+                    const MechAssistSectionLabel('Informations personnelles'),
+                    MechAssistSectionCard(
+                      children: [
+                        MechAssistSettingsTile(
+                          title: 'Nom complet',
+                          subtitle: _nameCtrl.text.isEmpty ? '—' : _nameCtrl.text,
+                          onTap: () => _editField(context, 'Nom', _nameCtrl),
                         ),
-                        maxLines: 2,
-                      ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Disponible pour les clients'),
-                        subtitle: const Text('Tu apparais sur la carte uniquement si tu es connecté et disponible.'),
-                        value: _mechanicAvailable,
-                        onChanged: (v) => setState(() => _mechanicAvailable = v),
-                      ),
-                    ],
+                        MechAssistSettingsTile(
+                          title: 'Numéro de téléphone',
+                          subtitle: _phoneCtrl.text.isEmpty ? '—' : _phoneCtrl.text,
+                          onTap: () => _editField(context, 'Téléphone', _phoneCtrl, keyboard: TextInputType.phone),
+                        ),
+                        MechAssistSettingsTile(
+                          title: 'E-mail',
+                          subtitle: _email.isEmpty ? '—' : _email,
+                        ),
+                        if (_role == 'mecanicien')
+                          MechAssistSettingsTile(
+                            title: 'Spécialités',
+                            subtitle: _specialtyCtrl.text.isEmpty ? '—' : _specialtyCtrl.text,
+                            onTap: () => _editField(context, 'Spécialités', _specialtyCtrl, maxLines: 3),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const MechAssistSectionLabel('Préférences & sécurité'),
+                    MechAssistSectionCard(
+                      children: [
+                        if (_role == 'mecanicien')
+                          SwitchListTile(
+                            secondary: const Icon(Icons.online_prediction_rounded, color: FeuTheme.deepBlue),
+                            title: Text('Disponible', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                            subtitle: const Text('Visible sur la carte'),
+                            value: _mechanicAvailable,
+                            activeTrackColor: FeuTheme.deepBlue,
+                            onChanged: (v) => setState(() => _mechanicAvailable = v),
+                          ),
+                        SwitchListTile(
+                          secondary: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
+                          title: Text('Notifications push', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                          value: true,
+                          onChanged: null,
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 28),
                     FilledButton(
                       onPressed: _saving ? null : _save,
                       style: FilledButton.styleFrom(
                         backgroundColor: FeuTheme.deepBlue,
                         minimumSize: const Size.fromHeight(52),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                       child: const Text('Enregistrer les modifications'),
                     ),

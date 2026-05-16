@@ -62,7 +62,7 @@ class NotificationNavigation {
           goDashboard();
           return;
         }
-        goDashboard(clientTab: 1);
+        goDashboard(clientTab: 2);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           appNavigatorKey.currentState?.pushNamed(
             '/intervention-chat',
@@ -77,11 +77,11 @@ class NotificationNavigation {
       case 'request_declined':
       case 'mechanic_marked_complete':
       case 'request_cancelled':
-        goDashboard(clientTab: 1);
+        goDashboard(clientTab: 2);
         return;
       case 'request_completed':
       case 'mechanic_rated':
-        goDashboard(clientTab: 2);
+        goDashboard(clientTab: 3);
         return;
       default:
         goDashboard();

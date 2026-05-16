@@ -80,7 +80,7 @@ class _MechAssistAppState extends State<MechAssistApp> {
           if (args is Map) {
             final t = args['tab'];
             if (t is int) {
-              tab = t.clamp(0, 2);
+              tab = t.clamp(0, 3);
             }
           }
           return DashboardClient(initialTabIndex: tab);

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../screens/user_profile_page.dart';
@@ -111,20 +110,21 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
     final top = MediaQuery.paddingOf(context).top;
     final canCall = onCall != null && normalizePhoneForDial(phone) != null;
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Material(
-        color: FeuTheme.deepBlue,
-        elevation: 2,
-        shadowColor: FeuTheme.charcoal.withValues(alpha: 0.2),
-        child: Padding(
+    return Material(
+        color: Colors.white,
+        elevation: 0,
+        shadowColor: FeuTheme.charcoal.withValues(alpha: 0.1),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
           padding: EdgeInsets.fromLTRB(2, top + 2, 2, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               IconButton(
                 onPressed: () => Navigator.maybePop(context),
-                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: FeuTheme.deepBlue, size: 20),
               ),
               UserAvatar(
                 name: peerName,
@@ -143,44 +143,38 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      if (roleLabel != null && roleLabel!.isNotEmpty)
-                        Text(
-                          roleLabel!,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white.withValues(alpha: 0.78),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
                       Text(
                         peerName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
-                          color: Colors.white,
+                          color: FeuTheme.charcoal,
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (specialty != null && specialty!.trim().isNotEmpty)
+                      if (_isOnline)
+                        Text(
+                          'En ligne',
+                          style: GoogleFonts.poppins(
+                            color: FeuTheme.urgencyLightFg,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      else if (specialty != null && specialty!.trim().isNotEmpty)
                         Text(
                           specialty!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white.withValues(alpha: 0.88),
-                            fontSize: 12.5,
-                          ),
+                          style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12.5),
                         )
                       else if (phone != null && phone!.trim().isNotEmpty)
                         Text(
                           phone!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white.withValues(alpha: 0.88),
-                            fontSize: 12.5,
-                          ),
+                          style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12.5),
                         ),
                     ],
                   ),
@@ -189,18 +183,20 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
               if (canCall)
                 IconButton(
                   onPressed: onCall,
-                  icon: const Icon(Icons.call_rounded, color: FeuTheme.flame, size: 28),
+                  icon: const Icon(Icons.call_rounded, color: FeuTheme.deepBlue, size: 26),
                   tooltip: 'Appeler',
                 ),
               IconButton(
                 onPressed: () => _openMenu(context),
-                icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+                icon: const Icon(Icons.info_outline_rounded, color: FeuTheme.deepBlue),
                 tooltip: 'Options',
               ),
             ],
           ),
         ),
-      ),
+            Divider(height: 1, color: FeuTheme.charcoal.withValues(alpha: 0.08)),
+          ],
+        ),
     );
   }
 }

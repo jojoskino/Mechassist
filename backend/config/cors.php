@@ -1,8 +1,13 @@
 <?php
 
+/*
+| CORS — phase test Flutter : toutes origines sur les routes API.
+| Restreindre allowed_origins en production stable si besoin.
+*/
+
 return [
 
-    'paths' => ['api/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
     'allowed_methods' => ['*'],
 

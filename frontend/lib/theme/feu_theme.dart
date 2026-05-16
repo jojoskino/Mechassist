@@ -9,8 +9,20 @@ abstract final class FeuTheme {
   static const Color deepBlue = Color(0xFF0F4C75);
   static const Color appBarSolid = Color(0xFF0F4C75);
   static const Color paper = Color(0xFFFFF5EF);
+  /// Fond écran secondaire (maquettes listes / profil).
+  static const Color pageGrey = Color(0xFFF7F8FA);
   /// Fond fil de discussion (blanc, comme le mockup).
-  static const Color chatBackdrop = Color(0xFFF7F8FA);
+  static const Color chatBackdrop = pageGrey;
+  /// Urgence légère / moyenne / critique (signalement panne).
+  static const Color urgencyLightBg = Color(0xFFE8F5E9);
+  static const Color urgencyLightFg = Color(0xFF2E7D32);
+  static const Color urgencyMediumBg = Color(0xFFFFF3E0);
+  static const Color urgencyMediumFg = Color(0xFF6D4C41);
+  static const Color urgencyCriticalBg = Color(0xFFFFEBEE);
+  static const Color urgencyCriticalFg = Color(0xFFC62828);
+  /// Carte revenus mécano (maquette).
+  static const Color statsBlue = Color(0xFF1565C0);
+  static const Color statsOrange = Color(0xFFFF9800);
   /// Bulles reçues.
   static const Color theirsBubble = Color(0xFFFFFFFF);
   /// Bulles envoyées — bleu MechAssist, texte blanc.

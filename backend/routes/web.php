@@ -7,6 +7,7 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+
 /*
  * Requis pour les e-mails de réinitialisation Laravel (notification ResetPassword).
  * L’app mobile utilise POST /api/reset-password ; cette page explique la marche à suivre.

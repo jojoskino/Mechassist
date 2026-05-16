@@ -22,7 +22,10 @@ import '../services/app_notification_hub.dart';
 import '../services/profile_signals.dart';
 import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
-import '../widgets/dashboard_brand_bar.dart';
+import '../widgets/mechassist_bottom_nav.dart';
+import '../widgets/mechassist_light_app_bar.dart';
+import '../widgets/mechanic_stats_header.dart';
+import '../screens/help_screen.dart';
 
 class DashboardMecanicien extends StatefulWidget {
   const DashboardMecanicien({super.key});
@@ -32,6 +35,7 @@ class DashboardMecanicien extends StatefulWidget {
 }
 
 class _DashboardMecanicienState extends State<DashboardMecanicien> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   bool available = false;
   bool loading = true;
   List<dynamic> requests = [];
@@ -227,10 +231,20 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     super.dispose();
   }
 
-  int get _pendingRequestsCount {
+  int get _pendingIncomingCount {
+    return requests.where((raw) => (raw is Map ? raw['status'] : null)?.toString() == 'pending').length;
+  }
+
+  int get _completedThisMonth {
+    final now = DateTime.now();
     return requests.where((raw) {
-      final s = (raw is Map ? raw['status'] : null)?.toString();
-      return s == 'pending';
+      if (raw is! Map) return false;
+      if (raw['status']?.toString() != 'completed') return false;
+      final at = raw['completed_at']?.toString() ?? raw['updated_at']?.toString();
+      if (at == null || at.isEmpty) return true;
+      final d = DateTime.tryParse(at);
+      if (d == null) return true;
+      return d.year == now.year && d.month == now.month;
     }).length;
   }
 
@@ -514,8 +528,11 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     await Navigator.pushNamed(context, '/intervention-chat', arguments: requestId);
   }
 
+  void _openDrawer() => _scaffoldKey.currentState?.openDrawer();
+
   @override
   Widget build(BuildContext context) {
+    final mapTab = _tabIndex == 0;
     return Theme(
       data: Theme.of(context).copyWith(
         cardTheme: CardThemeData(
@@ -524,27 +541,64 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
           color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
-            side: BorderSide(color: FeuTheme.ember.withValues(alpha: 0.14)),
+            side: BorderSide(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
           ),
         ),
       ),
       child: Scaffold(
-        backgroundColor: FeuTheme.paper,
-        appBar: DashboardBrandBar(
-          pendingRequestsCount: _pendingRequestsCount,
-          unreadNotificationsCount: AppNotificationHub.instance.unreadCount,
-          onOpenNotifications: _openNotifications,
-          onOpenRequests: () => setState(() => _tabIndex = 0),
-          trailing: _tabIndex == 2
-              ? [
-                  IconButton(
-                    icon: const Icon(Icons.logout_rounded, color: Colors.white),
-                    tooltip: 'Déconnexion',
-                    onPressed: () => _confirmLogout(context),
-                  ),
-                ]
-              : null,
+        key: _scaffoldKey,
+        backgroundColor: FeuTheme.pageGrey,
+        drawer: Drawer(
+          child: SafeArea(
+            child: ListView(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.person_outline_rounded, color: FeuTheme.deepBlue),
+                  title: const Text('Mon profil'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    setState(() => _tabIndex = 2);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
+                  title: const Text('Notifications'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openNotifications();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.help_outline_rounded, color: FeuTheme.deepBlue),
+                  title: const Text('Aide'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const HelpScreen()));
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
+        appBar: mapTab
+            ? null
+            : MechAssistLightAppBar(
+                onMenu: _openDrawer,
+                onProfile: () => setState(() => _tabIndex = 2),
+                profileInitial: currentName,
+                profileAvatarUrl: _myAvatarUrl,
+                profileAvatarCacheEpoch: _myAvatarCacheEpoch,
+                actions: [
+                  IconButton(
+                    onPressed: _openNotifications,
+                    icon: Badge(
+                      isLabelVisible: AppNotificationHub.instance.unreadCount > 0,
+                      label: Text('${AppNotificationHub.instance.unreadCount}'),
+                      child: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
+                    ),
+                  ),
+                ],
+              ),
         body: IndexedStack(
           index: _tabIndex,
           children: [
@@ -561,31 +615,11 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
             _buildAccountTab(),
           ],
         ),
-        bottomNavigationBar: BottomNavigationBar(
+        bottomNavigationBar: MechAssistBottomNav(
+          variant: MechAssistNavVariant.mechanic,
           currentIndex: _tabIndex,
+          badges: {0: _pendingIncomingCount},
           onTap: (i) => setState(() => _tabIndex = i),
-          backgroundColor: Colors.white,
-          selectedItemColor: FeuTheme.ember,
-          unselectedItemColor: Colors.grey.shade600,
-          type: BottomNavigationBarType.fixed,
-          elevation: 8,
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined),
-              activeIcon: Icon(Icons.map_rounded),
-              label: 'Carte',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.history_outlined),
-              activeIcon: Icon(Icons.history_rounded),
-              label: 'Historique',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.manage_accounts_outlined),
-              activeIcon: Icon(Icons.manage_accounts),
-              label: 'Compte',
-            ),
-          ],
         ),
       ),
     );
@@ -784,9 +818,11 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   }
 
   Widget _buildRequestsTab() {
+    final bottomInset = kBottomNavigationBarHeight + MediaQuery.paddingOf(context).bottom + 12;
     return MapsDiscoveryShell(
       map: _buildMechanicMapLayer(),
       loading: loading,
+      bottomInset: bottomInset,
       searchController: _requestSearchCtrl,
       searchHint: 'Client, véhicule…',
       onSearch: () => setState(() {}),
@@ -816,12 +852,17 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
         }
       },
       filterChips: _mechanicFilterChips(),
-      sheetTitle: 'Demandes reçues',
-      sheetSubtitle: available
-          ? 'Disponible · ${_filteredRequests.length} affichée(s)'
-          : 'Hors ligne · active-toi dans Compte',
-      subtitleAccent: available,
+      onMenuTap: _openDrawer,
+      sheetTitle: 'Zone d\'intervention',
+      sheetSubtitle: lat != null ? '${_jobSitesForMap().length} client(s) · 5 km de rayon' : 'GPS requis',
+      subtitleAccent: available && lat != null,
       onSheetRefresh: _refresh,
+      sheetHeaderExtra: MechanicStatsHeader(
+        isOnline: available,
+        onOnlineChanged: loading ? (_) {} : _setAvailability,
+        completedThisMonth: _completedThisMonth,
+        pendingCount: _pendingIncomingCount,
+      ),
       topBanner: lastError != null ? MapsSheetBanner(message: lastError!) : null,
       buildSheetBody: () {
         return [

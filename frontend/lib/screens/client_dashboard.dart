@@ -26,13 +26,17 @@ import '../utils/profile_navigation.dart';
 import '../widgets/user_avatar.dart';
 import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
-import '../widgets/dashboard_brand_bar.dart';
+import '../widgets/mechassist_bottom_nav.dart';
+import '../widgets/mechassist_light_app_bar.dart';
+import '../widgets/client_home_help_panel.dart';
+import '../widgets/rate_mechanic_sheet.dart';
 import '../utils/recent_addresses.dart';
+import '../screens/help_screen.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key, this.initialTabIndex = 0});
 
-  /// Onglet initial (0 = Carte, 1 = Demandes, 2 = Historique).
+  /// Onglet initial (0 = Accueil, 1 = Recherche, 2 = Demandes, 3 = Historique).
   final int initialTabIndex;
 
   @override
@@ -40,6 +44,7 @@ class DashboardClient extends StatefulWidget {
 }
 
 class _DashboardClientState extends State<DashboardClient> with WidgetsBindingObserver {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   List<dynamic> mechanics = [];
   List<Map<String, dynamic>> _apiMechanics = [];
 
@@ -74,7 +79,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   @override
   void initState() {
     super.initState();
-    _tabIndex = widget.initialTabIndex.clamp(0, 2);
+    _tabIndex = widget.initialTabIndex.clamp(0, 3);
     WidgetsBinding.instance.addObserver(this);
     AppNotificationHub.instance.addListener(_onNotificationsChanged);
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
@@ -420,7 +425,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     );
   }
 
-  Future<void> _createRequest(Map<String, dynamic> mechanic) async {
+  Future<void> _createRequest(Map<String, dynamic> mechanic, {String? initialDescription}) async {
     if (_sendingRequest) {
       return;
     }
@@ -459,6 +464,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       pickupLabel: _pickupLabel(),
       recentAddresses: recent,
       onRefreshLocation: _refreshLocationForRequest,
+      initialDescription: initialDescription,
     );
 
     try {
@@ -476,7 +482,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mécanicien invalide.')));
         return;
       }
-      final desc = result.description;
+      final desc = result.descriptionForApi();
       final vehicleType = result.vehicleType;
 
       Uint8List? photoBytes;
@@ -523,7 +529,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         }
         await _refreshAll(silent: true, requireFreshGps: false);
         if (mounted) {
-          setState(() => _tabIndex = 1);
+          setState(() => _tabIndex = 2);
         }
       }
     } finally {
@@ -713,58 +719,19 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (ok) await _refreshAll(silent: true, requireFreshGps: false);
   }
 
-  Future<void> _promptRateMechanic(int requestId) async {
-    var stars = 5;
-    final commentCtrl = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Noter le mécanicien'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Ton appréciation'),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (i) {
-                    final v = i + 1;
-                    return IconButton(
-                      onPressed: () => setSt(() => stars = v),
-                      icon: Icon(
-                        v <= stars ? Icons.star : Icons.star_border,
-                        size: 36,
-                        color: Colors.amber.shade700,
-                      ),
-                    );
-                  }),
-                ),
-                TextField(
-                  controller: commentCtrl,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    hintText: 'Commentaire (optionnel)',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Envoyer')),
-          ],
-        ),
-      ),
+  Future<void> _promptRateMechanic(int requestId, {String mechanicName = 'Mécanicien'}) async {
+    final result = await RateMechanicSheet.show(
+      context,
+      mechanicName: mechanicName,
+      subtitle: 'Expert diagnostic & réparation',
     );
-    final commentText = commentCtrl.text;
-    commentCtrl.dispose();
-    if (confirmed != true || !mounted) return;
+    if (result == null || !mounted) return;
+    final stars = result.stars;
+    var commentText = result.comment;
+    if (result.tags.isNotEmpty) {
+      final tags = result.tags.join(', ');
+      commentText = commentText.isEmpty ? 'Points forts : $tags' : '$commentText\nPoints forts : $tags';
+    }
     final token = await AuthStorage.getToken();
     if (token == null || !mounted) return;
     final res = await ApiService.rateMechanicForRequest(
@@ -785,8 +752,54 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (ok) await _refreshAll(silent: true, requireFreshGps: false);
   }
 
+  Map<String, dynamic>? _nearestMechanic() {
+    if (_displayMechanics.isEmpty) return null;
+    final sorted = List<dynamic>.from(_displayMechanics);
+    sorted.sort((a, b) {
+      final da = (a is Map ? a['distance_km'] : null);
+      final db = (b is Map ? b['distance_km'] : null);
+      final na = da is num ? da.toDouble() : double.tryParse('$da') ?? 999;
+      final nb = db is num ? db.toDouble() : double.tryParse('$db') ?? 999;
+      return na.compareTo(nb);
+    });
+    return Map<String, dynamic>.from(sorted.first as Map);
+  }
+
+  Future<void> _reportBreakdown({String? presetDescription}) async {
+    final m = _nearestMechanic();
+    if (m == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucun mécanicien à proximité pour le moment.')),
+      );
+      return;
+    }
+    await _createRequest(m, initialDescription: presetDescription);
+  }
+
+  void _openDrawer() {
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
+  Future<void> _openProfileFromDrawer() async {
+    Navigator.pop(context);
+    final result = await Navigator.pushNamed(context, '/profile');
+    if (!mounted) return;
+    final parsed = ProfileNavigationResult.fromDynamic(result);
+    if (parsed != null) {
+      setState(() {
+        if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
+          _myAvatarUrl = parsed.avatarUrl;
+          _myAvatarCacheEpoch = parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
+        }
+      });
+      if (parsed.updated) await _refreshAll(silent: true, requireFreshGps: false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final mapTab = _tabIndex == 0 || _tabIndex == 1;
     return Theme(
       data: Theme.of(context).copyWith(
         cardTheme: CardThemeData(
@@ -795,67 +808,93 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
-            side: BorderSide(color: FeuTheme.ember.withValues(alpha: 0.14)),
+            side: BorderSide(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
           ),
         ),
       ),
       child: Scaffold(
-      backgroundColor: FeuTheme.paper,
-      appBar: DashboardBrandBar(
-        pendingRequestsCount: _pendingRequestsCount,
-        unreadNotificationsCount: AppNotificationHub.instance.unreadCount,
-        onOpenNotifications: _openNotifications,
-        onOpenRequests: () => setState(() => _tabIndex = 1),
-        trailing: [
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.white),
-            tooltip: 'Déconnexion',
-            onPressed: () => _confirmLogout(context),
-          ),
-        ],
-      ),
-      body: _initializing && loading && _tabIndex == 0
-          ? const Center(child: CircularProgressIndicator(color: FeuTheme.ember))
-          : IndexedStack(
-              index: _tabIndex,
+        key: _scaffoldKey,
+        backgroundColor: FeuTheme.pageGrey,
+        drawer: Drawer(
+          child: SafeArea(
+            child: ListView(
+              padding: EdgeInsets.zero,
               children: [
-                _buildHomeTab(),
-                _buildRequestsTab(),
-                HistoryScreen(
-                  requests: requests,
-                  onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
-                  mechanicNameFor: _mechanicNameFromRequest,
-                  onOpenRequest: _showRequestDetail,
+                ListTile(
+                  leading: const Icon(Icons.person_outline_rounded, color: FeuTheme.deepBlue),
+                  title: const Text('Mon compte'),
+                  onTap: _openProfileFromDrawer,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
+                  title: const Text('Notifications'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openNotifications();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.help_outline_rounded, color: FeuTheme.deepBlue),
+                  title: const Text('Aide'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const HelpScreen()));
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: Icon(Icons.logout_rounded, color: Colors.red.shade700),
+                  title: Text('Déconnexion', style: TextStyle(color: Colors.red.shade700)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmLogout(context);
+                  },
                 ),
               ],
             ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _tabIndex,
-        onTap: (i) => setState(() => _tabIndex = i),
-        backgroundColor: Colors.white,
-        selectedItemColor: FeuTheme.ember,
-        unselectedItemColor: Colors.grey.shade600,
-        type: BottomNavigationBarType.fixed,
-        elevation: 8,
-        items: [
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.map_outlined),
-            activeIcon: Icon(Icons.map_rounded),
-            label: 'Carte',
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.assignment_outlined),
-            activeIcon: Icon(Icons.assignment),
-            label: 'Demandes',
-          ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.history_outlined),
-            activeIcon: Icon(Icons.history_rounded),
-            label: 'Historique',
-          ),
-        ],
+        ),
+        appBar: mapTab
+            ? null
+            : MechAssistLightAppBar(
+                onMenu: _openDrawer,
+                onProfile: _openProfileFromDrawer,
+                profileInitial: currentName,
+                profileAvatarUrl: _myAvatarUrl,
+                profileAvatarCacheEpoch: _myAvatarCacheEpoch,
+                actions: [
+                  IconButton(
+                    onPressed: _openNotifications,
+                    icon: Badge(
+                      isLabelVisible: AppNotificationHub.instance.unreadCount > 0,
+                      label: Text('${AppNotificationHub.instance.unreadCount}'),
+                      child: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
+                    ),
+                  ),
+                ],
+              ),
+        body: _initializing && loading && mapTab
+            ? const Center(child: CircularProgressIndicator(color: FeuTheme.ember))
+            : IndexedStack(
+                index: _tabIndex,
+                children: [
+                  _buildHomeTab(searchMode: false),
+                  _buildHomeTab(searchMode: true),
+                  _buildRequestsTab(),
+                  HistoryScreen(
+                    requests: requests,
+                    onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
+                    mechanicNameFor: _mechanicNameFromRequest,
+                    onOpenRequest: _showRequestDetail,
+                  ),
+                ],
+              ),
+        bottomNavigationBar: MechAssistBottomNav(
+          currentIndex: _tabIndex,
+          badges: {2: _pendingRequestsCount},
+          onTap: (i) => setState(() => _tabIndex = i),
+        ),
       ),
-    ),
     );
   }
 
@@ -1097,18 +1136,23 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     );
   }
 
-  Widget _buildHomeTab() {
+  Widget _buildHomeTab({bool searchMode = false}) {
+    final bottomInset = kBottomNavigationBarHeight + MediaQuery.paddingOf(context).bottom + 12;
     return MapsDiscoveryShell(
       map: _buildClientMapLayer(),
       loading: loading,
+      bottomInset: bottomInset,
       searchController: _mechanicKeywordCtrl,
-      searchHint: 'Mécaniciens, spécialité…',
+      searchHint: searchMode ? 'Où êtes-vous ?' : 'Mécaniciens, spécialité…',
+      searchHintGps: searchMode,
       onSearch: () => setState(() {}),
+      initialSheetFraction: searchMode ? 0.48 : 0.38,
       onRecenter: _recenterMap,
       onPrimaryFab: () => _refreshAll(silent: true, requireFreshGps: false),
       profileInitial: currentName,
       profileAvatarUrl: _myAvatarUrl,
       profileAvatarCacheEpoch: _myAvatarCacheEpoch,
+      onMenuTap: _openDrawer,
       onProfileTap: () async {
         final result = await Navigator.pushNamed(context, '/profile');
         if (!mounted) return;
@@ -1126,10 +1170,19 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         }
       },
       filterChips: _clientFilterChips(),
-      sheetTitle: 'Mécaniciens proches',
+      sheetTitle: searchMode ? 'Recherche' : 'Mécaniciens proches',
       sheetSubtitle: lat == null
           ? 'Localisation requise'
           : '${_displayMechanics.length} résultat(s) · rayon ${_searchRadiusKm.round()} km',
+      subtitleAccent: !searchMode && _displayMechanics.isNotEmpty,
+      sheetHeaderExtra: searchMode
+          ? null
+          : ClientHomeHelpPanel(
+              mechanicsNearby: _displayMechanics.length,
+              busy: _sendingRequest,
+              onReportBreakdown: _reportBreakdown,
+              onQuickPreset: (preset) => _reportBreakdown(presetDescription: preset),
+            ),
       topBanner: lastError != null
           ? Material(
               color: Colors.red.shade50,
@@ -1317,7 +1370,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                _promptRateMechanic(id);
+                _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(r));
               },
               child: const Text('Noter'),
             ),
@@ -1350,7 +1403,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           ),
         if (showRate)
           TextButton(
-            onPressed: () => _promptRateMechanic(id),
+            onPressed: () => _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(r)),
             child: const Text('Noter'),
           ),
       ],

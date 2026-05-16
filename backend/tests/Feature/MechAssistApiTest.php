@@ -12,6 +12,13 @@ class MechAssistApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_health_endpoint_returns_ok(): void
+    {
+        $this->getJson('/api/health')
+            ->assertOk()
+            ->assertExactJson(['status' => 'ok']);
+    }
+
     public function test_login_returns_token_for_valid_credentials(): void
     {
         User::factory()->create([

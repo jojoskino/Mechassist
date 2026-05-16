@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -25,17 +27,20 @@ class MapsDiscoveryShell extends StatefulWidget {
     this.topBanner,
     this.onSheetRefresh,
     this.initialSheetFraction = 0.38,
-    this.minSheetFraction = 0.2,
-    this.maxSheetFraction = 0.92,
+    this.minSheetFraction = 0.22,
+    this.maxSheetFraction = 0.88,
     this.primaryFabIcon = Icons.search_rounded,
     this.onPrimaryFab,
     this.loading = false,
+    this.sheetHeaderExtra,
+    this.searchHintGps = false,
+    this.onMenuTap,
+    this.bottomInset = 72,
   });
 
   final Widget map;
   final String sheetTitle;
   final String? sheetSubtitle;
-  /// Corps du panneau (cartes, listes…) — même [ScrollController] que le titre pour pouvoir tirer vers le haut.
   final List<Widget> Function() buildSheetBody;
   final TextEditingController? searchController;
   final String searchHint;
@@ -55,6 +60,11 @@ class MapsDiscoveryShell extends StatefulWidget {
   final IconData primaryFabIcon;
   final VoidCallback? onPrimaryFab;
   final bool loading;
+  final Widget? sheetHeaderExtra;
+  final bool searchHintGps;
+  final VoidCallback? onMenuTap;
+  /// Espace sous le contenu (barre de navigation basse).
+  final double bottomInset;
 
   @override
   State<MapsDiscoveryShell> createState() => _MapsDiscoveryShellState();
@@ -64,11 +74,30 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
   final DraggableScrollableController _sheetController = DraggableScrollableController();
   double _sheetFraction = 0.38;
 
+  List<double> get _snapSizes {
+    final mid = (widget.initialSheetFraction + widget.maxSheetFraction) / 2;
+    return [
+      widget.minSheetFraction,
+      widget.initialSheetFraction,
+      mid,
+      widget.maxSheetFraction,
+    ];
+  }
+
   @override
   void initState() {
     super.initState();
     _sheetFraction = widget.initialSheetFraction;
     _sheetController.addListener(_onSheetMoved);
+  }
+
+  @override
+  void didUpdateWidget(MapsDiscoveryShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialSheetFraction != widget.initialSheetFraction &&
+        _sheetController.isAttached) {
+      _animateSheetTo(widget.initialSheetFraction);
+    }
   }
 
   @override
@@ -81,15 +110,64 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
   void _onSheetMoved() {
     if (!_sheetController.isAttached) return;
     final next = _sheetController.size;
-    if ((next - _sheetFraction).abs() > 0.01) {
+    if ((next - _sheetFraction).abs() > 0.008) {
       setState(() => _sheetFraction = next);
     }
+  }
+
+  Future<void> _animateSheetTo(double size) async {
+    if (!_sheetController.isAttached) return;
+    await _sheetController.animateTo(
+      size.clamp(widget.minSheetFraction, widget.maxSheetFraction),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// Passe au palier suivant (comme un bottom sheet Google Maps).
+  Future<void> _cycleSheetUp() async {
+    if (!_sheetController.isAttached) return;
+    final current = _sheetController.size;
+    final snaps = _snapSizes;
+    for (final target in snaps) {
+      if (target > current + 0.04) {
+        await _animateSheetTo(target);
+        return;
+      }
+    }
+    await _animateSheetTo(widget.maxSheetFraction);
+  }
+
+  void _onHeaderDragUpdate(DragUpdateDetails details) {
+    if (!_sheetController.isAttached) return;
+    final h = MediaQuery.sizeOf(context).height;
+    if (h <= 0) return;
+    final next = _sheetController.size - details.delta.dy / h;
+    _sheetController.jumpTo(
+      next.clamp(widget.minSheetFraction, widget.maxSheetFraction),
+    );
+  }
+
+  void _snapToNearest() {
+    if (!_sheetController.isAttached) return;
+    final current = _sheetController.size;
+    var best = _snapSizes.first;
+    var bestDist = (best - current).abs();
+    for (final s in _snapSizes) {
+      final d = (s - current).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        best = s;
+      }
+    }
+    _animateSheetTo(best);
   }
 
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
     final sheetBottom = MediaQuery.sizeOf(context).height * _sheetFraction + 72;
+
     return Stack(
       children: [
         Positioned.fill(child: widget.map),
@@ -108,15 +186,45 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(height: topPad + 6),
+              if (widget.onMenuTap != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: widget.onMenuTap,
+                        icon: const Icon(Icons.menu_rounded, color: FeuTheme.deepBlue, size: 28),
+                      ),
+                      Text(
+                        'MechAssist',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                          color: FeuTheme.deepBlue,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (widget.onProfileTap != null)
+                        UserAvatar(
+                          name: widget.profileInitial ?? 'M',
+                          avatarUrl: widget.profileAvatarUrl,
+                          cacheEpoch: widget.profileAvatarCacheEpoch,
+                          radius: 20,
+                          onTap: widget.onProfileTap,
+                        ),
+                    ],
+                  ),
+                ),
               _MapsSearchBar(
                 controller: widget.searchController,
                 hint: widget.searchHint,
                 onSubmitted: widget.onSearch,
                 onChanged: widget.onSearch,
-                onProfileTap: widget.onProfileTap,
+                onProfileTap: widget.onMenuTap != null ? null : widget.onProfileTap,
                 profileInitial: widget.profileInitial,
                 profileAvatarUrl: widget.profileAvatarUrl,
                 profileAvatarCacheEpoch: widget.profileAvatarCacheEpoch,
+                showGpsIcon: widget.searchHintGps,
               ),
               if (widget.filterChips.isNotEmpty)
                 SizedBox(
@@ -161,16 +269,13 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
         ),
         DraggableScrollableSheet(
           controller: _sheetController,
+          expand: true,
           initialChildSize: widget.initialSheetFraction,
           minChildSize: widget.minSheetFraction,
           maxChildSize: widget.maxSheetFraction,
           snap: true,
-          snapSizes: [
-            widget.minSheetFraction,
-            widget.initialSheetFraction,
-            (widget.initialSheetFraction + widget.maxSheetFraction) / 2,
-            widget.maxSheetFraction,
-          ],
+          snapSizes: _snapSizes,
+          snapAnimationDuration: const Duration(milliseconds: 280),
           builder: (context, scrollController) {
             final body = widget.buildSheetBody();
             return Material(
@@ -179,90 +284,149 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
               borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               color: Colors.white,
               clipBehavior: Clip.antiAlias,
-              child: RefreshIndicator(
-                onRefresh: widget.onSheetRefresh ?? () async {},
-                child: ListView(
-                  controller: scrollController,
-                  physics: const AlwaysScrollableScrollPhysics(
-                    parent: ClampingScrollPhysics(),
+              child: Column(
+                children: [
+                  _SheetDragHeader(
+                    onDragTap: _cycleSheetUp,
+                    onVerticalDragUpdate: _onHeaderDragUpdate,
+                    onVerticalDragEnd: (_) => _snapToNearest(),
+                    title: widget.sheetTitle,
+                    subtitle: widget.sheetSubtitle,
+                    subtitleAccent: widget.subtitleAccent,
                   ),
-                  padding: const EdgeInsets.only(bottom: 88),
-                  children: [
-                    const SizedBox(height: 10),
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: FeuTheme.charcoal.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.sheetTitle,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.w800,
-                                    color: FeuTheme.charcoal,
-                                    letterSpacing: -0.3,
-                                  ),
-                                ),
-                                if (widget.sheetSubtitle != null && widget.sheetSubtitle!.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Row(
-                                      children: [
-                                        if (widget.subtitleAccent) ...[
-                                          Icon(Icons.circle, size: 8, color: Colors.green.shade600),
-                                          const SizedBox(width: 6),
-                                        ],
-                                        Expanded(
-                                          child: Text(
-                                            widget.sheetSubtitle!,
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 13.5,
-                                              fontWeight: widget.subtitleAccent ? FontWeight.w600 : FontWeight.w400,
-                                              color: widget.subtitleAccent
-                                                  ? const Color(0xFF2E7D32)
-                                                  : Colors.grey.shade700,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: widget.onSheetRefresh ?? () async {},
+                      color: FeuTheme.deepBlue,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return ListView(
+                            controller: scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: ClampingScrollPhysics(),
                             ),
-                          ),
-                          Icon(Icons.swipe_vertical_rounded, size: 22, color: Colors.grey.shade400),
-                        ],
+                            padding: EdgeInsets.fromLTRB(12, 4, 12, widget.bottomInset),
+                            children: [
+                              if (widget.sheetHeaderExtra != null) ...[
+                                widget.sheetHeaderExtra!,
+                                const SizedBox(height: 8),
+                              ],
+                              ...body,
+                              SizedBox(height: math.max(48, constraints.maxHeight - 48)),
+                            ],
+                          );
+                        },
                       ),
                     ),
-                    Divider(height: 1, color: FeuTheme.charcoal.withValues(alpha: 0.08)),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: body,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },
         ),
       ],
+    );
+  }
+}
+
+/// Poignée + titre : zone tactile pour tirer le panneau vers le haut.
+class _SheetDragHeader extends StatelessWidget {
+  const _SheetDragHeader({
+    required this.onDragTap,
+    required this.onVerticalDragUpdate,
+    required this.onVerticalDragEnd,
+    required this.title,
+    this.subtitle,
+    this.subtitleAccent = false,
+  });
+
+  final VoidCallback onDragTap;
+  final GestureDragUpdateCallback onVerticalDragUpdate;
+  final GestureDragEndCallback onVerticalDragEnd;
+  final String title;
+  final String? subtitle;
+  final bool subtitleAccent;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onDragTap,
+      onVerticalDragUpdate: onVerticalDragUpdate,
+      onVerticalDragEnd: onVerticalDragEnd,
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: FeuTheme.charcoal.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          color: FeuTheme.charcoal,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      if (subtitle != null && subtitle!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              if (subtitleAccent) ...[
+                                Icon(Icons.circle, size: 8, color: Colors.green.shade600),
+                                const SizedBox(width: 6),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  subtitle!,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13.5,
+                                    fontWeight: subtitleAccent ? FontWeight.w600 : FontWeight.w400,
+                                    color: subtitleAccent
+                                        ? const Color(0xFF2E7D32)
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Column(
+                  children: [
+                    Icon(Icons.keyboard_arrow_up_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.7), size: 28),
+                    Text(
+                      'Tirer',
+                      style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: FeuTheme.charcoal.withValues(alpha: 0.08)),
+        ],
+      ),
     );
   }
 }
@@ -277,6 +441,7 @@ class _MapsSearchBar extends StatelessWidget {
     this.profileInitial,
     this.profileAvatarUrl,
     this.profileAvatarCacheEpoch,
+    this.showGpsIcon = false,
   });
 
   final TextEditingController? controller;
@@ -287,6 +452,7 @@ class _MapsSearchBar extends StatelessWidget {
   final String? profileInitial;
   final String? profileAvatarUrl;
   final int? profileAvatarCacheEpoch;
+  final bool showGpsIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -316,7 +482,14 @@ class _MapsSearchBar extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: hint,
                 hintStyle: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
-                prefixIcon: Icon(Icons.search_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.75), size: 22),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: FeuTheme.deepBlue.withValues(alpha: 0.75),
+                  size: 22,
+                ),
+                suffixIcon: showGpsIcon
+                    ? Icon(Icons.gps_fixed_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.55), size: 20)
+                    : null,
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
