@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// URL de base Laravel **sans** le suffixe `/api` (ex. `http://192.168.1.10:8000`).
@@ -6,7 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiConfig {
   ApiConfig._();
 
+  /// API production Render (téléphone / tablette par défaut).
+  static const String productionOrigin = 'https://mechassist-api.onrender.com';
+
   static const String _prefsKey = 'mechassist_api_base_url';
+  static const String _defaultSeededKey = 'mechassist_api_default_seeded';
 
   /// Valeur en mémoire après [load] ou [setBaseUrlOverride].
   static String? _override;
@@ -21,6 +26,17 @@ class ApiConfig {
       await prefs.remove(_prefsKey);
     }
     _override = normalized;
+  }
+
+  /// Premier lancement mobile : pointe vers l’API Render (évite 10.0.2.2 sur téléphone réel).
+  static Future<void> ensureMobileProductionDefault() async {
+    if (kIsWeb) return;
+    await load();
+    if (_override != null && _override!.isNotEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_defaultSeededKey) == true) return;
+    await setBaseUrlOverride(productionOrigin);
+    await prefs.setBool(_defaultSeededKey, true);
   }
 
   static String? _normalizeStored(String? raw) {

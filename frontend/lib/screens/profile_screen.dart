@@ -96,13 +96,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _setPushEnabled(bool enabled) async {
     setState(() => _pushEnabled = enabled);
     await PushPreferences.setEnabled(enabled);
-    await PushSync.syncToken();
+    if (!enabled) {
+      await PushSync.syncToken();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notifications push désactivées')),
+      );
+      return;
+    }
+    final ok = await PushSync.syncToken();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(enabled ? 'Notifications push activées' : 'Notifications push désactivées'),
-      ),
-    );
+    final messenger = ScaffoldMessenger.of(context);
+    if (ok) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Notifications push activées')),
+      );
+    } else {
+      setState(() => _pushEnabled = false);
+      await PushPreferences.setEnabled(false);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impossible d’activer les notifications. Autorisez-les dans les paramètres Android '
+            'et vérifiez que l’app est installée sur un téléphone (pas le navigateur).',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
   }
 
   Future<void> _pickAvatar(ImageSource source) async {

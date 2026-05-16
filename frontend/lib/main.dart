@@ -25,6 +25,7 @@ void main() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
   await ApiConfig.load();
+  await ApiConfig.ensureMobileProductionDefault();
   await FirebaseBootstrap.init();
   runApp(const MechAssistApp());
 }

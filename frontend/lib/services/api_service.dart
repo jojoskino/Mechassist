@@ -22,10 +22,8 @@ class ApiService {
     if (kIsWeb) {
       return 'http://127.0.0.1:8000/api';
     }
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:8000/api';
-    }
-    return 'http://127.0.0.1:8000/api';
+    // Téléphone / tablette : API Render (10.0.2.2 ne marche que sur émulateur — voir Aide pour IP locale).
+    return '${ApiConfig.productionOrigin}/api';
   }
 
   /// Origine du serveur Laravel (sans le suffixe `/api`), pour résoudre les URLs `/storage/...`.

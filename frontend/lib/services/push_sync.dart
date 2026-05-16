@@ -5,19 +5,23 @@ import 'push_service.dart';
 
 /// Enregistre ou retire le jeton FCM selon la préférence utilisateur.
 class PushSync {
-  static Future<void> syncToken() async {
+  /// `true` si le jeton a été enregistré côté serveur.
+  static Future<bool> syncToken() async {
     final auth = await AuthStorage.getToken();
-    if (auth == null) return;
+    if (auth == null) return false;
 
     final enabled = await PushPreferences.isEnabled();
     if (!enabled) {
       await ApiService.updatePushToken(auth, null);
-      return;
+      return true;
     }
 
     final fcm = await PushService.initAndGetToken();
-    if (fcm != null && fcm.isNotEmpty) {
-      await ApiService.updatePushToken(auth, fcm);
+    if (fcm == null || fcm.isEmpty) {
+      return false;
     }
+    final res = await ApiService.updatePushToken(auth, fcm);
+    final code = res['status'] as int?;
+    return code != null && code >= 200 && code < 300;
   }
 }

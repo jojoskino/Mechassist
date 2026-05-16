@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/google_sign_in_service.dart';
 import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
 
@@ -42,45 +41,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// FCM peut prendre plusieurs secondes : ne bloque pas l’auth ; le tableau de bord rappelle aussi `updatePushToken`.
   void _syncPushTokenInBackground(String apiToken) {
     Future<void>.microtask(() => PushSync.syncToken());
-  }
-
-  Future<void> _googleRegister() async {
-    setState(() => isLoading = true);
-    try {
-      final idToken = await GoogleSignInService.signInForIdToken();
-      if (!mounted) return;
-      if (idToken == null) {
-        setState(() => isLoading = false);
-        return;
-      }
-      final res = await ApiService.googleLogin(idToken: idToken, role: role, fcmToken: null);
-      if (!mounted) return;
-      setState(() => isLoading = false);
-
-      if (res['status'] == 200 && res['token'] != null) {
-        final user = res['user'] as Map<String, dynamic>? ?? {};
-        final apiToken = res['token'].toString();
-        await AuthStorage.save(
-          token: apiToken,
-          role: user['role']?.toString() ?? role,
-          name: user['name']?.toString() ?? '',
-        );
-        if (!mounted) return;
-        _showSnack('Compte Google relié avec succès');
-        Navigator.pushReplacementNamed(
-          context,
-          (user['role']?.toString() ?? role) == 'mecanicien' ? '/mecanicien' : '/client',
-        );
-        _syncPushTokenInBackground(apiToken);
-      } else {
-        final msg = res['message']?.toString() ?? 'Inscription Google impossible';
-        _showSnack(msg, isError: true);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => isLoading = false);
-      _showSnack(e.toString(), isError: true);
-    }
   }
 
   Future<void> _register() async {
@@ -261,52 +221,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              Expanded(child: Divider(color: Colors.grey.shade300)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('ou', style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-              ),
-              Expanded(child: Divider(color: Colors.grey.shade300)),
-            ],
-          ),
-          const SizedBox(height: 18),
-          OutlinedButton(
-            onPressed: isLoading ? null : _googleRegister,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF10324A),
-              minimumSize: const Size.fromHeight(52),
-              side: const BorderSide(color: accent, width: 1.2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: const Text(
-                    'G',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                      color: Color(0xFF4285F4),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Text("S'inscrire avec Google", style: TextStyle(fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
         ],
       ),
     );

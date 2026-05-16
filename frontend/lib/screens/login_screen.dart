@@ -64,16 +64,21 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _syncPushTokenInBackground(String apiToken) {
-    Future<void>.microtask(() => PushSync.syncToken());
-  }
-
   Future<void> _login() async {
     if (emailCtrl.text.isEmpty || passwordCtrl.text.isEmpty) {
       _showSnack('Remplis tous les champs', isError: true);
       return;
     }
     setState(() => isLoading = true);
+    final reachable = await ApiService.pingHealth();
+    if (!reachable && mounted) {
+      setState(() => isLoading = false);
+      _showSnack(
+        'Serveur injoignable (${ApiService.serverOrigin}). Vérifiez Internet ou l’URL dans Aide.',
+        isError: true,
+      );
+      return;
+    }
     final res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     if (!mounted) return;
     setState(() => isLoading = false);
@@ -89,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (!mounted) return;
       _navigateByRole(user['role']?.toString() ?? 'client');
-      _syncPushTokenInBackground(apiToken);
+      await PushSync.syncToken();
     } else {
       _showSnack(res['message']?.toString() ?? 'Identifiants incorrects', isError: true);
     }
