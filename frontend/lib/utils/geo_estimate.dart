@@ -22,7 +22,7 @@ Duration estimateDriveDuration(double distanceKm, {double avgSpeedKmh = 32}) {
 String formatEta(Duration d) {
   if (d.inHours >= 1) {
     final m = d.inMinutes % 60;
-    return m > 0 ? '${d.inHours} h ${m} min' : '${d.inHours} h';
+    return m > 0 ? '${d.inHours} h $m min' : '${d.inHours} h';
   }
   return '${d.inMinutes} min';
 }
