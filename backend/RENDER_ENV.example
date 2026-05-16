@@ -10,8 +10,8 @@ APP_URL=https://mechassist-api.onrender.com
 DB_CONNECTION=pgsql
 DB_SSLMODE=require
 
-# Une seule ligne DB — host doit contenir "pooler.supabase.com"
-DATABASE_URL=postgresql://postgres.VOTRE_REF:VOTRE_MOT_DE_PASSE@aws-0-REGION.pooler.supabase.com:5432/postgres
+# URI complète Supabase > Connect > Session pooler (user = postgres.[ref], PAS "postgres" seul)
+DATABASE_URL=postgresql://postgres.ejyqsfqrhdydrrhyajww:VOTRE_MOT_DE_PASSE@aws-1-eu-north-1.pooler.supabase.com:5432/postgres
 
 # NE PAS mettre DB_HOST=db.xxxxx.supabase.co sur Render (IPv6 → échec)
 

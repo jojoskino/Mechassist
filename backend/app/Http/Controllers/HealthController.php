@@ -44,8 +44,12 @@ class HealthController
         } catch (\Throwable $e) {
             $msg = $e->getMessage();
             $hint = null;
-            if (str_contains($msg, 'Network is unreachable') || str_contains($msg, 'supabase.co')) {
-                $hint = 'Sur Render: utilisez DATABASE_URL avec host *.pooler.supabase.com (Session pooler), pas db.*.supabase.co.';
+            if (str_contains($msg, 'Network is unreachable')) {
+                $hint = 'Sur Render: host *.pooler.supabase.com (Session pooler), pas db.*.supabase.co.';
+            } elseif (str_contains($msg, 'ENOIDENTIFIER') || str_contains($msg, 'tenant identifier')) {
+                $hint = 'Utilisateur pooler Supabase : postgres.VOTRE_REF (ex. postgres.ejyqsfqrhdydrrhyajww), pas seulement postgres. Copiez l’URI complète depuis Supabase > Connect > Session pooler.';
+            } elseif (str_contains($msg, 'supabase.co')) {
+                $hint = 'Vérifiez DATABASE_URL (Session pooler) et DB_USERNAME=postgres.[ref-projet].';
             }
 
             return response()->json(array_filter([

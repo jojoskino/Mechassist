@@ -12,11 +12,11 @@ connection to db.xxxxx.supabase.co ... Network is unreachable
 
 1. Supabase → projet → **Connect** (bouton en haut)
 2. **Session pooler** (ou Connection pooling → Session)
-3. Copier l’**URI** (host type `aws-0-eu-central-1.pooler.supabase.com`, port `5432`)
+3. Copier l’**URI** entière (host `*.pooler.supabase.com`, user **`postgres.VOTRE_REF`** — ex. `postgres.ejyqsfqrhdydrrhyajww`, **pas** `postgres` seul)
 4. Render → **Environment** :
-   - Coller `DATABASE_URL=...` (URI complète)
+   - Coller `DATABASE_URL=...` (URI complète telle quelle)
    - `DB_SSLMODE=require`
-   - **Supprimer** `DB_HOST` si c’est `db.xxx.supabase.co`
+   - **Supprimer** `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD` si vous utilisez `DATABASE_URL` (évite les conflits)
 5. **Manual Deploy** → latest commit
 
 Voir aussi `RENDER_ENV.example`.
