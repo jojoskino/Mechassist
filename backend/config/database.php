@@ -97,6 +97,14 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', env('APP_ENV') === 'production' ? 'require' : 'prefer'),
+            // Supabase pooler (port 6543 / ?pgbouncer=true) : requis pour migrations Laravel
+            'options' => extension_loaded('pdo_pgsql') ? array_filter([
+                PDO::ATTR_EMULATE_PREPARES => filter_var(
+                    env('DB_EMULATE_PREPARES', str_contains((string) env('DATABASE_URL', ''), 'pgbouncer=true')
+                        || (string) env('DB_PORT') === '6543'),
+                    FILTER_VALIDATE_BOOL
+                ),
+            ]) : [],
         ],
 
         'sqlsrv' => [

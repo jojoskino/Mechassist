@@ -1,0 +1,20 @@
+# Copier ces variables dans Render > mechassist-api > Environment
+# Supabase : Connect > Session pooler > URI (PAS "Direct connection")
+
+APP_NAME=MechAssist
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=base64:REMPLACER_AVEC_php_artisan_key_generate_show
+APP_URL=https://mechassist-api.onrender.com
+
+DB_CONNECTION=pgsql
+DB_SSLMODE=require
+
+# Une seule ligne DB — host doit contenir "pooler.supabase.com"
+DATABASE_URL=postgresql://postgres.VOTRE_REF:VOTRE_MOT_DE_PASSE@aws-0-REGION.pooler.supabase.com:5432/postgres
+
+# NE PAS mettre DB_HOST=db.xxxxx.supabase.co sur Render (IPv6 → échec)
+
+LOG_CHANNEL=stderr
+LOG_LEVEL=warning
+L5_SWAGGER_UI_ENABLED=false

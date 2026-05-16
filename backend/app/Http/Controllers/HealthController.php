@@ -42,10 +42,17 @@ class HealthController
 
             return response()->json(['status' => 'DB OK']);
         } catch (\Throwable $e) {
-            return response()->json([
+            $msg = $e->getMessage();
+            $hint = null;
+            if (str_contains($msg, 'Network is unreachable') || str_contains($msg, 'supabase.co')) {
+                $hint = 'Sur Render: utilisez DATABASE_URL avec host *.pooler.supabase.com (Session pooler), pas db.*.supabase.co.';
+            }
+
+            return response()->json(array_filter([
                 'status' => 'DB FAIL',
-                'error' => $e->getMessage(),
-            ], 503);
+                'error' => $msg,
+                'hint' => $hint,
+            ]), 503);
         }
     }
 }
