@@ -1,12 +1,15 @@
-# MechAssist — lancer sur iPhone / simulateur iOS (nécessite un Mac avec Xcode).
-# Sur Windows : compilation iOS impossible en local ; utilisez un Mac ou un service CI (Codex, Codemagic).
+# MechAssist — iOS (Mac + Xcode). URL API ngrok auto.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+$repoRoot = Split-Path $PSScriptRoot
+. (Join-Path $repoRoot "scripts\mechassist-api-url.ps1") | Out-Null
+$apiUrl = $env:API_BASE_URL
 
 Write-Host ""
 Write-Host "Appareils Flutter :" -ForegroundColor Cyan
 & flutter devices
 Write-Host ""
-Write-Host "Lancement iOS (API ngrok)..." -ForegroundColor Cyan
-& flutter run --dart-define=API_BASE_URL=https://both-lapping-umpire.ngrok-free.dev
+Write-Host "Lancement iOS..." -ForegroundColor Cyan
+& flutter run --dart-define=API_BASE_URL=$apiUrl

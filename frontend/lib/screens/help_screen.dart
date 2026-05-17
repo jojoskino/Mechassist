@@ -65,7 +65,7 @@ class _HelpScreenState extends State<HelpScreen> {
         content: Text(
           ok
               ? (kIsWeb
-                  ? 'Connexion OK vers ${ApiConfig.productionOrigin}.'
+                  ? 'Connexion OK vers ${ApiService.serverOrigin}.'
                   : 'Connexion OK : le téléphone atteint le serveur.')
               : (kIsWeb
                   ? 'Échec : vérifiez que ngrok et Laravel (port 8000) tournent sur le PC.'
@@ -156,8 +156,8 @@ class _HelpScreenState extends State<HelpScreen> {
                     const SizedBox(height: 6),
                     Text(
                       kIsWeb
-                          ? 'Sur le navigateur, l’app utilise le tunnel ngrok :\n${ApiConfig.productionOrigin}\n\n'
-                              'Le PC doit avoir Laravel (port 8000) et ngrok actifs.'
+                          ? 'URL actuelle (ngrok auto via run_web.ps1) :\n${ApiService.serverOrigin}\n\n'
+                              'Lance l’app avec .\\run_web.ps1 : ngrok et l’URL sont configurés automatiquement.'
                           : 'Sur un vrai téléphone, l’émulateur par défaut (10.0.2.2) ne marche pas. '
                               'Mets l’IP LAN de ton PC, ex. http://192.168.1.5:8000 puis Enregistrer.\n\n'
                               'Ne mets jamais 0.0.0.0 dans l’app.',
@@ -197,7 +197,7 @@ class _HelpScreenState extends State<HelpScreen> {
                     ] else ...[
                       const SizedBox(height: 10),
                       SelectableText(
-                        ApiConfig.productionOrigin,
+                        ApiService.serverOrigin,
                         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 10),

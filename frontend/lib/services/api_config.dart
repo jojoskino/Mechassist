@@ -2,15 +2,30 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// URL de base Laravel **sans** le suffixe `/api` (ex. `http://192.168.1.10:8000`).
-/// Sur téléphone physique, `10.0.2.2` (émulateur) ne fonctionne pas : l’utilisateur peut
-/// enregistrer l’IP du PC ici (écran Aide).
+/// L’URL réelle vient de `--dart-define=API_BASE_URL` (scripts `run_*.ps1` / ngrok auto).
 class ApiConfig {
   ApiConfig._();
 
-  /// API par défaut (tunnel ngrok → Laravel local).
-  static const String productionOrigin = 'https://both-lapping-umpire.ngrok-free.dev';
-
   static const String _legacyRenderOrigin = 'https://mechassist-api.onrender.com';
+
+  static const String _prefsKey = 'mechassist_api_base_url';
+  static const String _defaultSeededKey = 'mechassist_api_default_seeded';
+
+  /// Valeur en mémoire après [load] ou [setBaseUrlOverride].
+  static String? _override;
+
+  static String? get baseUrlOverride => _override;
+
+  /// URL compilée via `flutter run --dart-define=API_BASE_URL=...` (scripts run_*.ps1).
+  static String? get compiledApiOrigin {
+    const fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    if (fromEnv.isEmpty) return null;
+    return _normalizeStored(fromEnv);
+  }
+
+  /// Origine affichée / secours après [load].
+  static String get productionOrigin =>
+      compiledApiOrigin ?? _override ?? 'http://127.0.0.1:8000';
 
   /// En-tête requis par ngrok free pour éviter la page d’avertissement navigateur.
   static Map<String, String> ngrokHeadersFor(String origin) {
@@ -23,14 +38,6 @@ class ApiConfig {
     return const {};
   }
 
-  static const String _prefsKey = 'mechassist_api_base_url';
-  static const String _defaultSeededKey = 'mechassist_api_default_seeded';
-
-  /// Valeur en mémoire après [load] ou [setBaseUrlOverride].
-  static String? _override;
-
-  static String? get baseUrlOverride => _override;
-
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
@@ -38,35 +45,40 @@ class ApiConfig {
     if (raw != null && raw.trim().isNotEmpty && normalized == null) {
       await prefs.remove(_prefsKey);
     }
-    _override = normalized;
-    if (_override == _legacyRenderOrigin) {
-      await setBaseUrlOverride(productionOrigin);
+    if (normalized == _legacyRenderOrigin) {
+      normalized = null;
+      await prefs.remove(_prefsKey);
     }
+    _override = normalized;
   }
 
-  /// Premier lancement : pointe vers l’API tunnel (Web + mobile ; évite localhost / 10.0.2.2).
+  /// Synchronise l’URL compilée (ngrok auto au lancement) et évite localhost sur mobile.
   static Future<void> ensureProductionDefault() async {
     await load();
-    const fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
-    if (fromEnv.isNotEmpty) return;
 
-    if (_override != null && _isEmulatorOnlyHost(_override!)) {
-      await setBaseUrlOverride(productionOrigin);
-      return;
-    }
-
-    // Web : toujours l’origine production (localhost enregistré dans Aide ne fonctionne pas).
-    if (kIsWeb) {
-      if (_override != productionOrigin) {
-        await setBaseUrlOverride(productionOrigin);
+    final compiled = compiledApiOrigin;
+    if (compiled != null && compiled.isNotEmpty) {
+      if (_override != compiled) {
+        await setBaseUrlOverride(compiled);
       }
       return;
     }
 
+    if (_override != null && _isEmulatorOnlyHost(_override!)) {
+      if (!kIsWeb) {
+        await setBaseUrlOverride(null);
+      }
+      return;
+    }
+
+    if (kIsWeb) {
+      return;
+    }
+
     if (_override != null && _override!.isNotEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_defaultSeededKey) == true) return;
-    await setBaseUrlOverride(productionOrigin);
     await prefs.setBool(_defaultSeededKey, true);
   }
 
@@ -94,7 +106,6 @@ class ApiConfig {
     if (s.endsWith('/api')) {
       s = s.substring(0, s.length - 4);
     }
-    // 0.0.0.0 = bind « toutes interfaces » côté serveur ; invalide dans navigateur / app.
     if (_hostIsZero(s)) {
       return null;
     }

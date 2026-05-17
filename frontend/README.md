@@ -6,11 +6,14 @@ Un workflow GitHub Actions (`.github/workflows/ci.yml`) exécute `php artisan te
 
 ## Démarrage rapide
 
-- API Laravel : depuis `../backend`, `php artisan serve --host=127.0.0.1 --port=8000` (local). Pour un **téléphone sur le Wi‑Fi** : `php artisan serve --host=0.0.0.0 --port=8000` puis dans l’app **Aide**, URL `http://IP_LAN_DU_PC:8000`. **Ne pas ouvrir `http://0.0.0.0:8000` dans Edge/Chrome** : ce n’est pas une adresse valide pour un navigateur (`ERR_ADDRESS_INVALID`). Sur le **même PC**, teste avec `http://127.0.0.1:8000` ou `http://localhost:8000`.
-- Documentation Swagger de l’API : `http://127.0.0.1:8000/api/documentation` (après `php artisan l5-swagger:generate` dans le backend).
-- App : `flutter run` (Android) ou `.\run_web.ps1` (navigateur via `web-server`)
-- Depuis l’app : écran **Aide** — saisir l’URL `http://IP_LAN_DU_PC:8000` puis **Enregistrer** et **Tester la connexion**. Sur **émulateur** Android, `10.0.2.2:8000` par défaut.
-- **Téléphone + même URL au build** : à la racine du dépôt, `powershell -ExecutionPolicy Bypass -File scripts/flutter-android-with-lan-api.ps1` (détecte l’IP LAN et lance `flutter run` avec `--dart-define=API_BASE_URL=...`). Pour **seulement compiler** l’APK : ajouter `-BuildOnly` (APK dans `frontend/build/app/outputs/flutter-apk/`). Forcer l’URL : `-ApiBaseUrl "http://172.20.10.2:8000"`.
+- API Laravel : depuis `../backend`, `php artisan serve --host=0.0.0.0 --port=8000`.
+- **Lancement normal (recommandé)** : depuis `frontend/`, les scripts démarrent **ngrok** si besoin et injectent l’URL automatiquement :
+  - Web : `.\run_web.ps1` ou `.\run.ps1`
+  - Android : `.\run_android.ps1` ou `.\run.ps1 -Platform android`
+  - iOS (Mac) : `.\run_ios.ps1`
+- **Téléphone / APK** : `powershell -ExecutionPolicy Bypass -File scripts/flutter-android-with-lan-api.ps1` (ngrok auto, repli IP LAN).
+- Swagger : `http://127.0.0.1:8000/api/documentation` (après `php artisan l5-swagger:generate` dans le backend).
+- Surcharge manuelle : écran **Aide** (sans `/api` à la fin). Éviter `flutter run` seul : l’URL ngrok ne sera pas injectée.
 - **Pare-feu Windows** (souvent la cause si le test échoue) : une fois en PowerShell **administrateur**, à la racine du dépôt :  
   `powershell -ExecutionPolicy Bypass -File scripts/open-firewall-laravel-8000.ps1`
 
