@@ -20,6 +20,7 @@ import '../widgets/chat_composer_bar.dart';
 import '../widgets/chat_message_bubble.dart';
 import '../widgets/chat_screen_header.dart';
 import '../screens/user_profile_page.dart';
+import '../utils/gps_position_tracker.dart';
 
 /// Discussion intervention : style messagerie (bulles, fond), couleurs MechAssist,
 /// rafraîchissement rapide, texte + photo + vocal (hors web pour le micro).
@@ -108,7 +109,13 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   void _startFastPoll() {
     _poll?.cancel();
     if (!_foreground) return;
-    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _load(silent: true));
+    // PERF: 12 s minimum ; arrêt si écran non visible (lifecycle + route).
+    _poll = Timer.periodic(perfChatPollInterval, (_) {
+      if (!_foreground) return;
+      final route = ModalRoute.of(context);
+      if (route != null && !route.isCurrent) return;
+      unawaited(_load(silent: true));
+    });
   }
 
   void _onProfileSignals() {
