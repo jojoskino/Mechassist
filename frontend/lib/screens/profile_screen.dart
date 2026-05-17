@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -30,7 +30,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _uploadingPhoto = false;
-  String? _loadError;
+  String? _loadWarning;
   String _role = 'client';
   String _email = '';
   String? _avatarUrl;
@@ -78,7 +78,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (token == null) {
       setState(() {
         _loading = false;
-        _loadError = 'Session expirée.';
+        _loadWarning = 'Session expirée. Reconnectez-vous.';
       });
       return;
     }
@@ -88,10 +88,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!ok) {
       setState(() {
         _loading = false;
-        _loadError = res['message']?.toString() ?? 'Impossible de charger le profil.';
+        _loadWarning = ApiService.userFacingMessage(
+          res,
+          fallback: 'Profil partiellement chargé. Vous pouvez quand même modifier vos informations.',
+        );
       });
+      _pushEnabled = await PushPreferences.isEnabled();
+      if (mounted) setState(() {});
       return;
     }
+    _applyProfileFromApi(res);
+    _loadWarning = null;
+    _pushEnabled = await PushPreferences.isEnabled();
+    setState(() => _loading = false);
+  }
+
+  void _applyProfileFromApi(Map<String, dynamic> res) {
     _role = res['role']?.toString() ?? 'client';
     _email = res['email']?.toString() ?? '';
     _nameCtrl.text = res['name']?.toString() ?? '';
@@ -101,8 +113,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
     final av = res['is_available'];
     _mechanicAvailable = av is bool ? av : av == 1 || av?.toString() == '1';
-    _pushEnabled = await PushPreferences.isEnabled();
-    setState(() => _loading = false);
+  }
+
+  void _showSnack(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red.shade700 : null,
+      ),
+    );
+  }
+
+  Future<bool> _patchProfileFields(Map<String, dynamic> fields) async {
+    final token = await AuthStorage.getToken();
+    if (token == null) {
+      _showSnack('Session expirée.', isError: true);
+      return false;
+    }
+    final res = await ApiService.patchProfile(token, fields);
+    if (!mounted) return false;
+    final code = res['status'] as int?;
+    final ok = code != null && code >= 200 && code < 300;
+    if (!ok) {
+      _showSnack(
+        ApiService.userFacingMessage(res, fallback: 'Enregistrement impossible'),
+        isError: true,
+      );
+      return false;
+    }
+    _applyProfileFromApi(res);
+    final name = res['name']?.toString().trim();
+    if (name != null && name.isNotEmpty) {
+      await AuthStorage.updateName(name);
+    }
+    _profileDirty = true;
+    ProfileSignals.instance.notifyProfilesChanged();
+    return true;
+  }
+
+  Future<void> _setMechanicAvailability(bool enabled) async {
+    final previous = _mechanicAvailable;
+    setState(() => _mechanicAvailable = enabled);
+    final token = await AuthStorage.getToken();
+    if (token == null) {
+      setState(() => _mechanicAvailable = previous);
+      return;
+    }
+    final res = await ApiService.updateMechanicAvailability(token, enabled);
+    if (!mounted) return;
+    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    if (!ok) {
+      setState(() => _mechanicAvailable = previous);
+      _showSnack(
+        ApiService.userFacingMessage(res, fallback: 'Impossible de mettre à jour la disponibilité'),
+        isError: true,
+      );
+      return;
+    }
+    _profileDirty = true;
+    ProfileSignals.instance.notifyProfilesChanged();
+    if (enabled) {
+      unawaited(ApiService.touchPresence(token));
+    }
   }
 
   Future<void> _setPushEnabled(bool enabled) async {
@@ -205,36 +278,77 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _showEmailInfo() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('E-mail', style: AppFonts.style(fontWeight: FontWeight.w700)),
+        content: Text(
+          _email.isEmpty
+              ? 'Votre e-mail de connexion n’est pas disponible pour le moment.'
+              : '$_email\n\nL’e-mail de connexion ne peut pas être modifié ici. '
+                  'Utilisez « Mot de passe oublié » sur l’écran de connexion si besoin.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _editField(
-    BuildContext context,
     String label,
     TextEditingController ctrl, {
     TextInputType? keyboard,
     int maxLines = 1,
+    required Map<String, dynamic> Function(String trimmed) buildPatch,
   }) async {
     final local = TextEditingController(text: ctrl.text);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label, style: AppFonts.style(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: local,
-          keyboardType: keyboard,
-          maxLines: maxLines,
-          autofocus: true,
-          decoration: InputDecoration(border: const OutlineInputBorder(), labelText: label),
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(label, style: AppFonts.style(fontWeight: FontWeight.w700)),
+          content: TextField(
+            controller: local,
+            keyboardType: keyboard,
+            maxLines: maxLines,
+            autofocus: true,
+            decoration: InputDecoration(border: const OutlineInputBorder(), labelText: label),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enregistrer')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('OK')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      ctrl.text = local.text;
-      setState(() {});
+      );
+      if (ok != true || !mounted) return;
+
+      final trimmed = local.text.trim();
+      if (label == 'Nom' && trimmed.isEmpty) {
+        _showSnack('Le nom ne peut pas être vide.', isError: true);
+        return;
+      }
+      if (label == 'Téléphone' && trimmed.length > 20) {
+        _showSnack('Numéro trop long (20 caractères max).', isError: true);
+        return;
+      }
+
+      final previous = ctrl.text;
+      ctrl.text = trimmed;
+      setState(() => _saving = true);
+      final saved = await _patchProfileFields(buildPatch(trimmed));
+      if (!mounted) return;
+      setState(() => _saving = false);
+      if (!saved) {
+        ctrl.text = previous;
+        setState(() {});
+        return;
+      }
+      _showSnack('$label enregistré.');
+    } finally {
+      local.dispose();
     }
-    local.dispose();
   }
 
   Future<void> _save() async {
@@ -247,9 +361,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final token = await AuthStorage.getToken();
     if (token == null || !mounted) return;
     setState(() => _saving = true);
+    final phone = _phoneCtrl.text.trim();
     final body = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
-      'phone': _phoneCtrl.text.trim(),
+      'phone': phone.isEmpty ? null : phone,
     };
     if (_role == 'mecanicien') {
       body['mechanic_specialty'] = _specialtyCtrl.text.trim();
@@ -261,22 +376,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final code = res['status'] as int?;
     final ok = code != null && code >= 200 && code < 300;
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res['message']?.toString() ?? 'Enregistrement impossible')),
+      _showSnack(
+        ApiService.userFacingMessage(res, fallback: 'Enregistrement impossible'),
+        isError: true,
       );
       return;
     }
+    _applyProfileFromApi(res);
     final name = res['name']?.toString().trim();
     if (name != null && name.isNotEmpty) {
       await AuthStorage.updateName(name);
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profil enregistré.')),
-    );
-    setState(() => _profileDirty = true);
+    _showSnack('Profil enregistré.');
+    setState(() {
+      _profileDirty = true;
+      _loadWarning = null;
+    });
     ProfileSignals.instance.notifyProfilesChanged();
-    Navigator.pop(context, _popPayload());
   }
 
   @override
@@ -297,7 +414,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         automaticallyImplyLeading: false,
         actions: [
-          if (!_loading && _loadError == null)
+          if (!_loading)
             TextButton(
               onPressed: _saving ? null : _save,
               child: _saving
@@ -312,16 +429,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: FeuTheme.ember))
-          : _loadError != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_loadError!, textAlign: TextAlign.center),
-                  ),
-                )
-              : ListView(
+          : ListView(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                   children: [
+                    if (_loadWarning != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Material(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          child: ListTile(
+                            dense: true,
+                            leading: Icon(Icons.info_outline_rounded, color: Colors.orange.shade800),
+                            title: Text(
+                              _loadWarning!,
+                              style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.refresh_rounded),
+                              onPressed: () {
+                                setState(() {
+                                  _loading = true;
+                                  _loadWarning = null;
+                                });
+                                _load();
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
                     Center(
                       child: Stack(
                         children: [
@@ -373,22 +509,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         MechAssistSettingsTile(
                           title: 'Nom complet',
                           subtitle: _nameCtrl.text.isEmpty ? '—' : _nameCtrl.text,
-                          onTap: () => _editField(context, 'Nom', _nameCtrl),
+                          onTap: () => _editField(
+                            'Nom',
+                            _nameCtrl,
+                            buildPatch: (v) => {'name': v},
+                          ),
                         ),
                         MechAssistSettingsTile(
                           title: 'Numéro de téléphone',
                           subtitle: _phoneCtrl.text.isEmpty ? '—' : _phoneCtrl.text,
-                          onTap: () => _editField(context, 'Téléphone', _phoneCtrl, keyboard: TextInputType.phone),
+                          onTap: () => _editField(
+                            'Téléphone',
+                            _phoneCtrl,
+                            keyboard: TextInputType.phone,
+                            buildPatch: (v) => {'phone': v.isEmpty ? null : v},
+                          ),
                         ),
                         MechAssistSettingsTile(
                           title: 'E-mail',
                           subtitle: _email.isEmpty ? '—' : _email,
+                          onTap: _showEmailInfo,
                         ),
                         if (_role == 'mecanicien')
                           MechAssistSettingsTile(
                             title: 'Spécialités',
                             subtitle: _specialtyCtrl.text.isEmpty ? '—' : _specialtyCtrl.text,
-                            onTap: () => _editField(context, 'Spécialités', _specialtyCtrl, maxLines: 3),
+                            onTap: () => _editField(
+                              'Spécialités',
+                              _specialtyCtrl,
+                              maxLines: 3,
+                              buildPatch: (v) => {'mechanic_specialty': v},
+                            ),
                           ),
                       ],
                     ),
@@ -403,7 +554,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             subtitle: const Text('Visible sur la carte'),
                             value: _mechanicAvailable,
                             activeTrackColor: FeuTheme.deepBlue,
-                            onChanged: (v) => setState(() => _mechanicAvailable = v),
+                            onChanged: _loading || _saving ? null : _setMechanicAvailability,
                           ),
                         SwitchListTile(
                           secondary: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),

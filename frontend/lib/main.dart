@@ -39,8 +39,11 @@ void main() async {
   ApiKeepAlive.instance.start();
   unawaited(ApiService.warmServer(wait: false));
   unawaited(ClientConfigCache.get());
+  // Android : Firebase AVANT runApp (sinon crash [core/no-app] au démarrage).
+  if (!kIsWeb) {
+    await FirebaseBootstrap.init();
+  }
   runApp(const MechAssistApp());
-  unawaited(FirebaseBootstrap.init());
 }
 
 class MechAssistApp extends StatefulWidget {
@@ -54,7 +57,7 @@ class _MechAssistAppState extends State<MechAssistApp> {
   @override
   void initState() {
     super.initState();
-    if (!kIsWeb) {
+    if (!kIsWeb && FirebaseBootstrap.initialized) {
       FirebaseMessaging.instance.getInitialMessage().then((m) {
         if (m == null) return;
         WidgetsBinding.instance.addPostFrameCallback((_) {

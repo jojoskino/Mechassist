@@ -42,7 +42,8 @@ class DashboardMecanicien extends StatefulWidget {
 class _DashboardMecanicienState extends State<DashboardMecanicien> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   bool available = false;
-  bool loading = true;
+  bool loading = false;
+  bool _availabilityBusy = false;
   List<dynamic> requests = [];
   String currentName = 'Mecanicien';
   String currentRole = 'mecanicien';
@@ -72,7 +73,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
     _applyMemoryCacheInstant();
     unawaited(_loadPublicConfig());
-    unawaited(_refresh());
+    unawaited(_refresh(silent: true));
     _refreshTimer = Timer.periodic(const Duration(seconds: 40), (_) => _refresh(silent: true));
     _presenceTimer = Timer.periodic(const Duration(seconds: 90), (_) => _touchPresence());
     _syncPush();
@@ -95,7 +96,10 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
 
   void _applyMemoryCacheInstant() {
     final cached = ApiDataCache.requestsSync(mechanic: true);
-    if (cached == null || cached.isEmpty) return;
+    if (cached == null || cached.isEmpty) {
+      loading = true;
+      return;
+    }
     requests = cached;
     loading = false;
     lastError = null;
@@ -439,19 +443,54 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     });
   }
 
-  Future<void> _setAvailability(bool value) async {
+  Future<void> _publishLocationForDiscovery() async {
     final token = await AuthStorage.getToken();
     if (token == null) return;
+    if (lat != null && lng != null) {
+      await ApiService.updateLocation(token, lat!, lng!);
+      await ApiService.touchPresence(token);
+      return;
+    }
+    if (!await _ensureLocationPermission()) return;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+      ).timeout(const Duration(seconds: 8));
+      _applyCoords(pos.latitude, pos.longitude);
+      await ApiService.updateLocation(token, pos.latitude, pos.longitude);
+      await ApiService.touchPresence(token);
+    } catch (_) {}
+  }
+
+  Future<void> _setAvailability(bool value) async {
+    if (_availabilityBusy) return;
+    final token = await AuthStorage.getToken();
+    if (token == null) return;
+    final previous = available;
+    setState(() {
+      _availabilityBusy = true;
+      available = value;
+    });
     final res = await ApiService.updateMechanicAvailability(token, value);
     if (!mounted) return;
     final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
-    if (ok) {
-      setState(() => available = value);
-    } else {
+    if (!ok) {
+      setState(() {
+        available = previous;
+        _availabilityBusy = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(res['message']?.toString() ?? 'Erreur disponibilité')),
       );
+      return;
     }
+    if (value) {
+      await _publishLocationForDiscovery();
+    } else {
+      unawaited(ApiService.touchPresence(token));
+    }
+    if (!mounted) return;
+    setState(() => _availabilityBusy = false);
   }
 
   Future<void> _processRequest(int id, bool accept, Map<String, dynamic> request) async {
@@ -1033,7 +1072,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
       onSheetRefresh: _refresh,
       sheetHeaderExtra: MechanicStatsHeader(
         isOnline: available,
-        onOnlineChanged: loading ? (_) {} : _setAvailability,
+        onOnlineChanged: _availabilityBusy ? (_) {} : _setAvailability,
         completedThisMonth: _completedThisMonth,
         pendingCount: _pendingIncomingCount,
       ),
@@ -1127,7 +1166,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
           ),
         SwitchListTile(
           value: available,
-          onChanged: loading ? null : _setAvailability,
+          onChanged: _availabilityBusy ? null : _setAvailability,
           title: const Text('Disponible'),
           subtitle: Text(
             available ? 'Visible par les clients' : 'Hors ligne',

@@ -18,11 +18,8 @@ class FirebaseBootstrap {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       initialized = true;
     } catch (e, st) {
-      assert(() {
-        debugPrint('Firebase init ignorée: $e');
-        debugPrint('$st');
-        return true;
-      }());
+      debugPrint('Firebase init ignorée (push désactivé): $e');
+      debugPrint('$st');
     }
   }
 }

@@ -84,6 +84,38 @@ class ApiService {
     return false;
   }
 
+  /// Message lisible pour l’utilisateur (validation Laravel, réseau, etc.).
+  static String userFacingMessage(
+    Map<String, dynamic> res, {
+    String fallback = 'Une erreur est survenue.',
+  }) {
+    final errors = res['errors'];
+    if (errors is Map) {
+      for (final entry in errors.entries) {
+        final v = entry.value;
+        if (v is List && v.isNotEmpty) {
+          return v.first.toString();
+        }
+        if (v != null) return v.toString();
+      }
+    }
+    final msg = res['message']?.toString().trim();
+    if (msg != null && msg.isNotEmpty && msg.length < 400) {
+      return msg;
+    }
+    final status = res['status'] as int? ?? res['http_status'] as int?;
+    if (status == 401 || status == 403) {
+      return 'Session expirée. Reconnectez-vous.';
+    }
+    if (status == 422) {
+      return 'Vérifiez les informations saisies.';
+    }
+    if (isTransientFailure(res)) {
+      return 'Connexion lente. Réessayez dans quelques secondes.';
+    }
+    return fallback;
+  }
+
   /// Erreur réseau transitoire (cold start Render) — ne pas afficher à l’utilisateur.
   static bool isTransientFailure(Map<String, dynamic> res) {
     final status = res['status'] as int? ?? res['http_status'] as int?;

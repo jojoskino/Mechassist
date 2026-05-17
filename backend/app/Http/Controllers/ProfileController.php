@@ -17,7 +17,7 @@ class ProfileController extends Controller
         $user = $request->user();
         $rules = [
             'name' => 'sometimes|string|max:255',
-            'phone' => 'sometimes|string|max:20',
+            'phone' => 'sometimes|nullable|string|max:20',
         ];
         if ($user->role === 'mecanicien') {
             $rules['is_available'] = 'sometimes|boolean';
@@ -34,7 +34,7 @@ class ProfileController extends Controller
 
         $validated = $request->validate($rules);
         $user->fill($validated);
-        if ($user->role === 'mecanicien' && array_key_exists('is_available', $validated) && $validated['is_available']) {
+        if ($user->role === 'mecanicien' && array_key_exists('is_available', $validated)) {
             $user->last_seen_at = now();
         }
         $user->save();

@@ -25,7 +25,8 @@ class MechanicSearchController extends Controller
         $lat = (float) $validated['latitude'];
         $lng = (float) $validated['longitude'];
 
-        $onlineBefore = now()->subMinutes(5);
+        // Badge « en ligne » : activité récente ; la liste inclut tout mécano disponible avec GPS.
+        $onlineBefore = now()->subMinutes(15);
 
         // Pré-filtre SQL (bounding box) avant le calcul Haversine — beaucoup plus rapide.
         $latDelta = $radius / 111.0;
@@ -42,16 +43,6 @@ class MechanicSearchController extends Controller
             ->whereNotNull('longitude')
             ->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
             ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta])
-            ->where(function ($q) use ($onlineBefore) {
-                $q->where(function ($q2) use ($onlineBefore) {
-                    $q2->whereNotNull('last_seen_at')
-                        ->where('last_seen_at', '>=', $onlineBefore);
-                })->orWhere(function ($q2) use ($onlineBefore) {
-                    $q2->whereNull('last_seen_at')
-                        ->whereNotNull('last_location_at')
-                        ->where('last_location_at', '>=', $onlineBefore);
-                });
-            })
             ->get(['id', 'name', 'phone', 'mechanic_specialty', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at', 'avatar_path', 'role']);
 
         $withDistance = $mechanics->map(function (User $u) use ($lat, $lng, $onlineBefore) {
