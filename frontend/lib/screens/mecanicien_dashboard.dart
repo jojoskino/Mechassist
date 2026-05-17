@@ -55,7 +55,6 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   Timer? _refreshTimer;
   Timer? _presenceTimer;
   Timer? _liveSyncDebounce;
-  int _refreshTick = 0;
   String _requestsSig = '';
   DateTime? _lastRequestsFetch;
   StreamSubscription<Position>? _positionSub;
@@ -90,7 +89,10 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   void _scheduleRefreshTimer() {
     _refreshTimer?.cancel();
-    final interval = available ? const Duration(seconds: 6) : const Duration(seconds: 18);
+    final hasWork = _activeRequests.isNotEmpty;
+    final interval = hasWork
+        ? const Duration(seconds: 4)
+        : (available ? const Duration(seconds: 8) : const Duration(seconds: 20));
     _refreshTimer = Timer.periodic(interval, (_) => _onPeriodicRefresh());
   }
 
@@ -102,12 +104,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   void _onPeriodicRefresh() {
     if (!mounted) return;
-    _refreshTick++;
-    if (_refreshTick % 5 == 0) {
-      unawaited(_refresh(silent: true, refreshProfile: true));
-    } else {
-      unawaited(_refreshRequestsOnly(silent: true));
-    }
+    unawaited(_refreshRequestsOnly(silent: true));
   }
 
   void _onLiveSync() {
@@ -140,6 +137,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     if (sig == _requestsSig) return false;
     _requestsSig = sig;
     requests = next;
+    _scheduleRefreshTimer();
     return true;
   }
 

@@ -33,8 +33,10 @@ class InterventionRequestController extends Controller
         $q = InterventionRequest::query()->with([
             'client:id,name,phone,avatar_path,last_seen_at,last_location_at,role',
             'mechanic:id,name,phone,mechanic_specialty,is_available,avatar_path,last_seen_at,last_location_at,role',
-            'mechanicRating',
         ]);
+        if (($validated['status'] ?? null) === 'completed') {
+            $q->with('mechanicRating');
+        }
 
         if ($user->role === 'client') {
             $q->where('client_id', $user->id);
@@ -363,16 +365,21 @@ class InterventionRequestController extends Controller
         $row->save();
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
 
-        $this->fcmService->sendToToken(
-            $row->mechanic?->fcm_token,
-            'Demande annulée',
-            'Le client a annulé sa demande.',
-            ['type' => 'request_cancelled', 'request_id' => (string) $row->id]
-        );
+        $payload = $this->transform($row->fresh());
+        $mechanicToken = $row->mechanic?->fcm_token;
+        $requestId = $row->id;
 
-        $this->firestoreSync->syncInterventionRequest($row->fresh());
+        dispatch(function () use ($mechanicToken, $requestId, $row): void {
+            app(FcmService::class)->sendToToken(
+                $mechanicToken,
+                'Demande annulée',
+                'Le client a annulé sa demande.',
+                ['type' => 'request_cancelled', 'request_id' => (string) $requestId]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row->fresh());
+        })->afterResponse();
 
-        return response()->json($this->transform($row->fresh()));
+        return response()->json($payload);
     }
 
     private function authorizeParticipant(int $userId, InterventionRequest $row): void

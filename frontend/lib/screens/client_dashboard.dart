@@ -100,7 +100,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _requestsSig = _signatureForRequests(requests);
     unawaited(_loadPublicConfig());
     unawaited(_refreshAll(requireFreshGps: false));
-    _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) => _onPeriodicRefresh());
+    _scheduleRefreshTimer();
     _syncPush();
     _startPositionTracking();
   }
@@ -127,13 +127,29 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     });
   }
 
+  bool get _hasActiveClientFlow {
+    return requests.any((raw) {
+      final s = (raw is Map ? raw['status'] : null)?.toString();
+      return s == 'pending' || s == 'accepted' || s == 'in_progress';
+    });
+  }
+
+  void _scheduleRefreshTimer() {
+    _refreshTimer?.cancel();
+    final interval = _hasActiveClientFlow
+        ? const Duration(seconds: 5)
+        : const Duration(seconds: 12);
+    _refreshTimer = Timer.periodic(interval, (_) => _onPeriodicRefresh());
+  }
+
   void _onPeriodicRefresh() {
     if (!mounted) return;
     _refreshTick++;
-    if (_refreshTick % 4 == 0) {
-      unawaited(_refreshAll(silent: true, requireFreshGps: false, refreshProfile: false));
-    } else {
-      unawaited(_refreshRequestsOnly());
+    unawaited(_refreshRequestsOnly());
+    if (_refreshTick % 6 == 0 && lat != null && lng != null) {
+      AuthStorage.getToken().then((token) {
+        if (token != null) unawaited(_fetchNearbyInBackground(token));
+      });
     }
   }
 
@@ -146,11 +162,36 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     return buf.toString();
   }
 
+  Future<void> _fetchNearbyInBackground(String token) async {
+    if (lat == null || lng == null || !mounted) return;
+    final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
+    final spec = _specialtyFilterCtrl.text.trim();
+    final nearby = await ApiService.nearbyMechanics(
+      token,
+      lat!,
+      lng!,
+      radiusKm: _searchRadiusKm,
+      minRating: minR,
+      specialty: spec.isEmpty ? null : spec,
+    );
+    if (!mounted) return;
+    final ns = nearby['status'] as int?;
+    if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
+      _apiMechanics = (nearby['data'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      unawaited(ApiDataCache.saveMechanics(_apiMechanics));
+      _recomputeMergedMechanics();
+      setState(() {});
+    }
+  }
+
   bool _applyRequestsList(List<dynamic> next) {
     final sig = _signatureForRequests(next);
     if (sig == _requestsSig) return false;
     _requestsSig = sig;
     requests = next;
+    _scheduleRefreshTimer();
     return true;
   }
 
@@ -356,15 +397,28 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     String? errorMsg;
     try {
       final reuseCoords = lat != null && lng != null && !requireFreshGps;
+      final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
+      final spec = _specialtyFilterCtrl.text.trim();
 
       final batch = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token, force: true),
+        ApiService.listRequests(token, force: !silent),
         !reuseCoords ? _getPositionQuick() : Future<Position?>.value(null),
+        (reuseCoords && lat != null && lng != null)
+            ? ApiService.nearbyMechanics(
+                token,
+                lat!,
+                lng!,
+                radiusKm: _searchRadiusKm,
+                minRating: minR,
+                specialty: spec.isEmpty ? null : spec,
+              )
+            : Future<Map<String, dynamic>>.value({}),
       ]);
       final me = batch[0] as Map<String, dynamic>;
       final reqRes = batch[1] as Map<String, dynamic>;
       final position = batch[2] as Position?;
+      final nearbyPreloaded = batch[3] as Map<String, dynamic>;
 
       if (refreshProfile) {
         final ms = me['status'] as int?;
@@ -380,47 +434,6 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         lng = position.longitude;
       }
 
-      if (lat != null && lng != null) {
-        if (_shouldPostLocation()) {
-          _lastLocationPost = DateTime.now();
-          ApiService.postLocation(token, lat!, lng!);
-        }
-        final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
-        final spec = _specialtyFilterCtrl.text.trim();
-        final nearby = await ApiService.nearbyMechanics(
-          token,
-          lat!,
-          lng!,
-          radiusKm: _searchRadiusKm,
-          minRating: minR,
-          specialty: spec.isEmpty ? null : spec,
-        );
-        final ns = nearby['status'] as int?;
-        if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
-          _apiMechanics = (nearby['data'] as List)
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList();
-          unawaited(ApiDataCache.saveMechanics(_apiMechanics));
-        } else if (!ApiService.isTransientFailure(nearby)) {
-          _apiMechanics = [];
-          errorMsg ??=
-              _messageIfRealError(nearby, 'Impossible de charger les mécaniciens (code ${nearby['status']}).');
-        } else {
-          _scheduleSilentRetry();
-        }
-        _recomputeMergedMechanics();
-      } else {
-        _apiMechanics = [];
-        _recomputeMergedMechanics();
-        if (kIsWeb) {
-          errorMsg ??=
-              'Géolocalisation refusée ou indisponible dans le navigateur. Autorise la position pour ce site (icône à gauche de l’URL) puis rafraîchis.';
-        } else {
-          errorMsg ??=
-              'Position GPS indisponible (services désactivés ou permission refusée). Active la localisation puis rafraîchis.';
-        }
-      }
-
       final rs = reqRes['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqRes['data'] is List) {
         _applyRequestsList(List<dynamic>.from(reqRes['data'] as List));
@@ -432,6 +445,41 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             _messageIfRealError(reqRes, 'Impossible de charger tes demandes (code ${reqRes['status']}).');
       } else {
         _scheduleSilentRetry();
+      }
+
+      if (lat != null && lng != null) {
+        if (_shouldPostLocation()) {
+          _lastLocationPost = DateTime.now();
+          ApiService.postLocation(token, lat!, lng!);
+        }
+        if (reuseCoords && nearbyPreloaded.isNotEmpty) {
+          final ns = nearbyPreloaded['status'] as int?;
+          if (ns != null && ns >= 200 && ns < 300 && nearbyPreloaded['data'] is List) {
+            _apiMechanics = (nearbyPreloaded['data'] as List)
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+            unawaited(ApiDataCache.saveMechanics(_apiMechanics));
+          } else if (!ApiService.isTransientFailure(nearbyPreloaded)) {
+            _apiMechanics = [];
+            errorMsg ??= _messageIfRealError(
+              nearbyPreloaded,
+              'Impossible de charger les mécaniciens (code ${nearbyPreloaded['status']}).',
+            );
+          }
+          _recomputeMergedMechanics();
+        } else {
+          unawaited(_fetchNearbyInBackground(token));
+        }
+      } else {
+        _apiMechanics = [];
+        _recomputeMergedMechanics();
+        if (kIsWeb) {
+          errorMsg ??=
+              'Géolocalisation refusée ou indisponible dans le navigateur. Autorise la position pour ce site (icône à gauche de l’URL) puis rafraîchis.';
+        } else {
+          errorMsg ??=
+              'Position GPS indisponible (services désactivés ou permission refusée). Active la localisation puis rafraîchis.';
+        }
       }
     } catch (_) {
       if (requests.isEmpty && _apiMechanics.isEmpty) {

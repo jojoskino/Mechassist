@@ -35,7 +35,7 @@ class ApiResponseCache {
 
   static final _requestLists = <String, List<dynamic>>{};
   static final _requestListsAt = <String, DateTime>{};
-  static const _requestListTtl = Duration(seconds: 3);
+  static const _requestListTtl = Duration(seconds: 6);
 
   static String _requestListKey(String token, String? status) =>
       '$token|${status?.trim() ?? ''}';

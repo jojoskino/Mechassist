@@ -58,29 +58,33 @@ class ApiService {
   }
 
   static Future<bool> _doWarm() async {
-    for (var i = 0; i < 3; i++) {
-      if (await pingHealth(timeout: const Duration(seconds: 6))) {
+    for (var i = 0; i < 4; i++) {
+      if (await pingHealth(timeout: const Duration(seconds: 8))) {
         _serverWarm = true;
         _warming = null;
         return true;
       }
-      if (i < 2) await Future<void>.delayed(Duration(milliseconds: 400 + i * 300));
+      if (i < 3) await Future<void>.delayed(Duration(milliseconds: 250 + i * 200));
     }
     _warming = null;
     return false;
   }
 
-  /// Vérifie que le backend répond (`/api/health` puis `/up`).
+  /// Vérifie que le backend répond (`/api/health` et `/up` en parallèle).
   static Future<bool> pingHealth({Duration timeout = const Duration(seconds: 5)}) async {
     final origin = serverOrigin.replaceAll(RegExp(r'/+$'), '');
-    for (final path in ['/api/health', '/up']) {
+    final checks = ['/api/health', '/up'].map((path) async {
       try {
         final response = await _client.get(Uri.parse('$origin$path')).timeout(timeout);
-        if (response.statusCode == 200) {
-          _serverWarm = true;
-          return true;
-        }
-      } catch (_) {}
+        return response.statusCode == 200;
+      } catch (_) {
+        return false;
+      }
+    });
+    final results = await Future.wait(checks);
+    if (results.any((ok) => ok)) {
+      _serverWarm = true;
+      return true;
     }
     return false;
   }
@@ -205,15 +209,18 @@ class ApiService {
     }
   }
 
-  static const Duration _httpTimeoutWarm = Duration(seconds: 18);
-  static const Duration _httpTimeoutCold = Duration(seconds: 35);
+  static const Duration _httpTimeoutWarm = Duration(seconds: 12);
+  static const Duration _httpTimeoutCold = Duration(seconds: 28);
   static const Duration _uploadTimeoutWarm = Duration(seconds: 45);
   static const Duration _uploadTimeoutCold = Duration(seconds: 60);
 
   static const _transientBody = '{"message":"","transient":true}';
 
   static Future<http.Response> _tw(Future<http.Response> Function() request) async {
-    final attempts = _serverWarm ? 1 : 2;
+    if (!_serverWarm) {
+      unawaited(warmServer(wait: false));
+    }
+    final attempts = _serverWarm ? 2 : 4;
     final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
     for (var attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) {
@@ -478,7 +485,7 @@ class ApiService {
     String? photoFilename,
   }) async {
     try {
-      await warmServer(wait: true);
+      unawaited(warmServer(wait: false));
       final hasPhoto = photoBytes != null && photoBytes.isNotEmpty;
       if (hasPhoto) {
         final request = http.MultipartRequest('POST', Uri.parse('$_apiRoot/requests'));

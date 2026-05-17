@@ -21,7 +21,7 @@ class ApiKeepAlive with WidgetsBindingObserver {
   void _schedule() {
     _timer?.cancel();
     if (!_foreground) return;
-    _timer = Timer.periodic(const Duration(minutes: 3), (_) {
+    _timer = Timer.periodic(const Duration(minutes: 2), (_) {
       unawaited(ApiService.warmServer(wait: false));
     });
   }
