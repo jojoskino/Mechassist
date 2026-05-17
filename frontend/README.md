@@ -8,8 +8,8 @@ Un workflow GitHub Actions (`.github/workflows/ci.yml`) exécute `php artisan te
 
 - **PostgreSQL local** : base `MechAssist_db` sur `127.0.0.1:5432` (voir `backend/.env`).
 - API Laravel : `php artisan serve --host=0.0.0.0 --port=8000` (ou démarrage auto via les scripts).
-- **Lancement normal** : depuis `frontend/` — API locale injectée automatiquement :
-  - Web : `.\run_web.ps1` → `http://127.0.0.1:8000`
+- **Lancement Web (1 seul onglet)** — ne pas utiliser `flutter run` puis Edge (ouvre souvent 4 onglets) :
+  - `.\flutter_run.ps1` ou `.\run_web.ps1` → http://localhost:53100 + API `http://127.0.0.1:8000`
   - Android émulateur : `.\run_android.ps1` → `http://10.0.2.2:8000`
   - Téléphone physique (Wi‑Fi) : `powershell -ExecutionPolicy Bypass -File scripts/flutter-android-with-lan-api.ps1` → IP LAN du PC
 - Swagger : `http://127.0.0.1:8000/api/documentation`

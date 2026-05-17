@@ -3,7 +3,7 @@ class ApiPerf {
   ApiPerf._();
 
   static bool isFastApiHost(String origin) {
-    final host = Uri.tryParse(origin).host.toLowerCase();
+    final host = Uri.tryParse(origin)?.host.toLowerCase() ?? '';
     if (host.isEmpty) return false;
     if (host == 'localhost' ||
         host == '127.0.0.1' ||
