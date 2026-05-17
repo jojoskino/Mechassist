@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
@@ -48,6 +49,8 @@ class ApiService {
   static bool _serverWarm = false;
   static Future<bool>? _warming;
 
+  static bool get isServerWarm => _serverWarm;
+
   /// Réveille Render. [wait] : attendre que le serveur réponde (splash / login).
   static Future<bool> warmServer({bool wait = true}) {
     if (_serverWarm && !wait) return Future.value(true);
@@ -57,17 +60,35 @@ class ApiService {
     return f;
   }
 
-  static Future<bool> _doWarm() async {
-    for (var i = 0; i < 4; i++) {
-      if (await pingHealth(timeout: const Duration(seconds: 8))) {
-        _serverWarm = true;
-        _warming = null;
+  /// Attend que le backend réponde (cold start Render, surtout Web).
+  static Future<bool> ensureBackendReady({
+    Duration maxWait = const Duration(seconds: 120),
+  }) async {
+    if (_serverWarm) return true;
+    final deadline = DateTime.now().add(maxWait);
+    var pause = const Duration(milliseconds: 350);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await pingHealth(
+        timeout: kIsWeb ? const Duration(seconds: 25) : const Duration(seconds: 12),
+      )) {
         return true;
       }
-      if (i < 3) await Future<void>.delayed(Duration(milliseconds: 250 + i * 200));
+      await Future<void>.delayed(pause);
+      if (pause < const Duration(seconds: 4)) {
+        pause = Duration(milliseconds: pause.inMilliseconds + 350);
+      }
     }
-    _warming = null;
-    return false;
+    return _serverWarm;
+  }
+
+  static Future<bool> _doWarm() async {
+    try {
+      return await ensureBackendReady(
+        maxWait: kIsWeb ? const Duration(seconds: 90) : const Duration(seconds: 35),
+      );
+    } finally {
+      _warming = null;
+    }
   }
 
   /// Vérifie que le backend répond (`/api/health` et `/up` en parallèle).
@@ -123,6 +144,7 @@ class ApiService {
 
   /// Erreur réseau transitoire (cold start Render) — ne pas afficher à l’utilisateur.
   static bool isTransientFailure(Map<String, dynamic> res) {
+    if (res['transient'] == true) return true;
     final status = res['status'] as int? ?? res['http_status'] as int?;
     if (status == 408 || status == 0 || status == 502 || status == 503 || status == 504) {
       return true;
@@ -132,7 +154,10 @@ class ApiService {
         msg.contains('delai') ||
         msg.contains('temps') ||
         msg.contains('injoignable') ||
-        msg.contains('timeout');
+        msg.contains('timeout') ||
+        msg.contains('erreur réseau') ||
+        msg.contains('connexion impossible') ||
+        msg.contains('met du temps');
   }
 
   /// URL publique absolue pour un chemin renvoyé par l’API (ex. `photo_url`).
@@ -209,8 +234,11 @@ class ApiService {
     }
   }
 
-  static const Duration _httpTimeoutWarm = Duration(seconds: 12);
-  static const Duration _httpTimeoutCold = Duration(seconds: 28);
+  static Duration get _httpTimeoutWarm =>
+      kIsWeb ? const Duration(seconds: 20) : const Duration(seconds: 12);
+
+  static Duration get _httpTimeoutCold =>
+      kIsWeb ? const Duration(seconds: 90) : const Duration(seconds: 28);
   static const Duration _uploadTimeoutWarm = Duration(seconds: 45);
   static const Duration _uploadTimeoutCold = Duration(seconds: 60);
 
@@ -218,9 +246,11 @@ class ApiService {
 
   static Future<http.Response> _tw(Future<http.Response> Function() request) async {
     if (!_serverWarm) {
-      unawaited(warmServer(wait: false));
+      await ensureBackendReady(
+        maxWait: kIsWeb ? const Duration(seconds: 45) : const Duration(seconds: 20),
+      );
     }
-    final attempts = _serverWarm ? 2 : 4;
+    final attempts = _serverWarm ? 2 : (kIsWeb ? 5 : 4);
     final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
     for (var attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) {
@@ -284,7 +314,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -308,7 +338,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -332,7 +362,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -367,7 +397,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -383,7 +413,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -408,7 +438,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -433,7 +463,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -469,7 +499,7 @@ class ApiService {
         'message': msg ?? 'Impossible de charger les mécaniciens (${response.statusCode}).',
       };
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -548,10 +578,13 @@ class ApiService {
   }
 
   static Map<String, dynamic> _networkFailure(Object e) {
-    final origin = serverOrigin;
+    if (kDebugMode) {
+      debugPrint('ApiService: échec réseau vers $serverOrigin — $e');
+    }
     return {
       'status': 0,
-      'message': 'Connexion impossible ($origin). Vérifiez le réseau ou l’URL dans Aide. Détail : $e',
+      'transient': true,
+      'message': 'Le serveur met du temps à répondre. Réessayez dans quelques secondes.',
     };
   }
 
@@ -567,7 +600,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -593,7 +626,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -633,7 +666,7 @@ class ApiService {
         'message': msg ?? 'Impossible de charger les demandes (${response.statusCode}).',
       };
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -677,7 +710,7 @@ class ApiService {
       ApiResponseCache.putRequest(id, out);
       return out;
     } catch (e) {
-      return {'http_status': 0, 'message': 'Erreur réseau : $e'};
+      return {..._networkFailure(e), 'http_status': 0};
     }
   }
 
@@ -698,7 +731,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -716,7 +749,7 @@ class ApiService {
       final response = await _twMultipart(request);
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -741,7 +774,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -759,7 +792,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -777,7 +810,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -796,7 +829,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -819,7 +852,7 @@ class ApiService {
       }
       return body;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -840,7 +873,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -879,7 +912,7 @@ class ApiService {
         'message': msg ?? 'Impossible de charger les messages (${response.statusCode}).',
       };
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -914,7 +947,7 @@ class ApiService {
       }
       return parsed;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -936,7 +969,7 @@ class ApiService {
       }
       return parsed;
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -948,7 +981,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 
@@ -964,7 +997,7 @@ class ApiService {
       ));
       return _parseBody(response);
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
   }
 }

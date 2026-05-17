@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -16,6 +17,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  String _status = 'Chargement…';
+
   @override
   void initState() {
     super.initState();
@@ -23,7 +26,12 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    unawaited(ApiService.warmServer(wait: false));
+    if (kIsWeb) {
+      if (mounted) setState(() => _status = 'Connexion au serveur…');
+      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 120));
+    } else {
+      unawaited(ApiService.warmServer(wait: false));
+    }
     await Future<void>.delayed(const Duration(milliseconds: 120));
     if (!mounted) return;
     final session = await AuthStorage.getSessionFields();
@@ -76,7 +84,16 @@ class _SplashScreenState extends State<SplashScreen> {
                   height: 1.35,
                 ),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: 20),
+              Text(
+                _status,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 20),
               const SizedBox(
                 width: 40,
                 height: 40,

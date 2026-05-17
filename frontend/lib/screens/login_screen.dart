@@ -72,9 +72,12 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => isLoading = true);
-    unawaited(ApiService.warmServer(wait: false));
+    if (!ApiService.isServerWarm) {
+      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 90));
+    }
     var res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     if (ApiService.isTransientFailure(res)) {
+      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
       res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     }
     if (!mounted) return;
@@ -93,9 +96,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _navigateByRole(user['role']?.toString() ?? 'client');
       await PushSync.syncToken();
     } else if (ApiService.isTransientFailure(res)) {
-      _showSnack('Connexion en cours, réessaie dans un instant.', isError: true);
+      _showSnack(ApiService.userFacingMessage(res, fallback: 'Serveur en réveil, réessayez.'), isError: true);
     } else {
-      _showSnack(res['message']?.toString() ?? 'Identifiants incorrects', isError: true);
+      _showSnack(ApiService.userFacingMessage(res, fallback: 'Identifiants incorrects'), isError: true);
     }
   }
 

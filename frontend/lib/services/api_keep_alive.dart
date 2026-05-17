@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'api_service.dart';
@@ -21,7 +22,8 @@ class ApiKeepAlive with WidgetsBindingObserver {
   void _schedule() {
     _timer?.cancel();
     if (!_foreground) return;
-    _timer = Timer.periodic(const Duration(minutes: 2), (_) {
+    final interval = kIsWeb ? const Duration(seconds: 90) : const Duration(minutes: 2);
+    _timer = Timer.periodic(interval, (_) {
       unawaited(ApiService.warmServer(wait: false));
     });
   }

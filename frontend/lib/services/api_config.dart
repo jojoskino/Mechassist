@@ -31,9 +31,22 @@ class ApiConfig {
   /// Premier lancement : pointe vers l’API Render (Web + mobile ; évite localhost / 10.0.2.2).
   static Future<void> ensureProductionDefault() async {
     await load();
-    if (!kIsWeb && _override != null && _isEmulatorOnlyHost(_override!)) {
+    const fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    if (fromEnv.isNotEmpty) return;
+
+    if (_override != null && _isEmulatorOnlyHost(_override!)) {
       await setBaseUrlOverride(productionOrigin);
+      return;
     }
+
+    // Web : toujours Render (localhost enregistré dans Aide ne fonctionne pas).
+    if (kIsWeb) {
+      if (_override != productionOrigin) {
+        await setBaseUrlOverride(productionOrigin);
+      }
+      return;
+    }
+
     if (_override != null && _override!.isNotEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_defaultSeededKey) == true) return;

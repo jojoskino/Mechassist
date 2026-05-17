@@ -22,7 +22,10 @@ Write-Host "MechAssist Web -> http://localhost:$port" -ForegroundColor Cyan
 Write-Host "API -> $apiUrl" -ForegroundColor DarkGray
 Write-Host ""
 
-flutter run -d web-server `
+# web-server : URL stable ; chrome : ouvre l’onglet navigateur directement.
+$device = if ($env:MECHASSIST_WEB_DEVICE) { $env:MECHASSIST_WEB_DEVICE } else { "web-server" }
+
+flutter run -d $device `
     --web-port=$port `
     --web-hostname=localhost `
     --dart-define=API_BASE_URL=$apiUrl

@@ -242,7 +242,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   void _scheduleSilentRetry() {
-    Future<void>.delayed(const Duration(seconds: 2), () {
+    Future<void>.delayed(const Duration(seconds: 2), () async {
+      if (!mounted) return;
+      if (!ApiService.isServerWarm) {
+        await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
+      }
       if (!mounted) return;
       _refreshAll(silent: true, requireFreshGps: false, refreshProfile: false);
     });
@@ -396,6 +400,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
     String? errorMsg;
     try {
+      if (!ApiService.isServerWarm) {
+        await ApiService.ensureBackendReady(
+          maxWait: kIsWeb ? const Duration(seconds: 60) : const Duration(seconds: 25),
+        );
+      }
       final reuseCoords = lat != null && lng != null && !requireFreshGps;
       final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
       final spec = _specialtyFilterCtrl.text.trim();
@@ -470,16 +479,18 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         } else {
           unawaited(_fetchNearbyInBackground(token));
         }
-      } else {
+      } else if (requests.isEmpty && _apiMechanics.isEmpty) {
         _apiMechanics = [];
         _recomputeMergedMechanics();
         if (kIsWeb) {
           errorMsg ??=
-              'Géolocalisation refusée ou indisponible dans le navigateur. Autorise la position pour ce site (icône à gauche de l’URL) puis rafraîchis.';
+              'Autorise la géolocalisation pour ce site (icône à gauche de l’URL) pour voir les mécaniciens proches.';
         } else {
           errorMsg ??=
               'Position GPS indisponible (services désactivés ou permission refusée). Active la localisation puis rafraîchis.';
         }
+      } else {
+        _recomputeMergedMechanics();
       }
     } catch (_) {
       if (requests.isEmpty && _apiMechanics.isEmpty) {
@@ -496,7 +507,14 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     setState(() {
       loading = false;
       _initializing = false;
-      lastError = errorMsg;
+      if (errorMsg != null && ApiService.isTransientFailure({'status': 0, 'message': errorMsg})) {
+        lastError = null;
+        if (requests.isEmpty && _apiMechanics.isEmpty) {
+          _scheduleSilentRetry();
+        }
+      } else {
+        lastError = errorMsg;
+      }
     });
   }
 

@@ -54,15 +54,22 @@ class _HelpScreenState extends State<HelpScreen> {
 
   Future<void> _testPing() async {
     setState(() => _testingPing = true);
-    final ok = await ApiService.pingHealth();
+    if (!ApiService.isServerWarm) {
+      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 90));
+    }
+    final ok = await ApiService.pingHealth(timeout: const Duration(seconds: 20));
     if (!mounted) return;
     setState(() => _testingPing = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           ok
-              ? 'Connexion OK : le téléphone atteint le PC (GET /up).'
-              : 'Échec : vérifie l’URL ci-dessus, le pare-feu Windows (scripts/open-firewall-laravel-8000.ps1) et php artisan serve --host=0.0.0.0',
+              ? (kIsWeb
+                  ? 'Connexion OK vers ${ApiConfig.productionOrigin}.'
+                  : 'Connexion OK : le téléphone atteint le serveur.')
+              : (kIsWeb
+                  ? 'Échec : le serveur cloud met du temps à réveiller. Réessayez dans 1 minute.'
+                  : 'Échec : vérifie l’URL ci-dessus, le pare-feu Windows et php artisan serve --host=0.0.0.0'),
         ),
         backgroundColor: ok ? Colors.green.shade800 : Colors.red.shade800,
       ),
@@ -70,6 +77,10 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   Future<void> _saveApiOrigin() async {
+    if (kIsWeb) {
+      await _resetApiOrigin();
+      return;
+    }
     final raw = _apiOriginCtrl.text.trim();
     if (raw.isEmpty) {
       await ApiConfig.setBaseUrlOverride(null);
@@ -99,13 +110,23 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   Future<void> _resetApiOrigin() async {
-    await ApiConfig.setBaseUrlOverride(null);
+    if (kIsWeb) {
+      await ApiConfig.setBaseUrlOverride(ApiConfig.productionOrigin);
+    } else {
+      await ApiConfig.setBaseUrlOverride(null);
+    }
     if (!mounted) return;
     setState(() {
       _apiOriginCtrl.text = ApiService.serverOrigin;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('URL par défaut rétablie (émulateur / machine locale).')),
+      SnackBar(
+        content: Text(
+          kIsWeb
+              ? 'API cloud Render rétablie.'
+              : 'URL par défaut rétablie (émulateur / machine locale).',
+        ),
+      ),
     );
   }
 
@@ -128,46 +149,63 @@ class _HelpScreenState extends State<HelpScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Serveur Laravel (obligatoire sur téléphone physique)',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    Text(
+                      kIsWeb ? 'Serveur cloud (Web)' : 'Serveur Laravel (téléphone physique)',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     const SizedBox(height: 6),
                     Text(
-                      'Sur un vrai téléphone, l’émulateur par défaut (10.0.2.2) ne marche pas. '
-                      'Mets l’IP LAN de ton PC, ex. http://192.168.1.5:8000 puis Enregistrer.\n\n'
-                      'Ne mets jamais 0.0.0.0 : c’est seulement pour la commande `serve` sur le PC. '
-                      'Dans le navigateur sur ton ordinateur, ouvre http://127.0.0.1:8000 ou http://localhost:8000 .',
+                      kIsWeb
+                          ? 'Sur le navigateur, l’app utilise l’API Render :\n${ApiConfig.productionOrigin}\n\n'
+                              'Le premier chargement peut prendre 1–2 min si le serveur était en veille.'
+                          : 'Sur un vrai téléphone, l’émulateur par défaut (10.0.2.2) ne marche pas. '
+                              'Mets l’IP LAN de ton PC, ex. http://192.168.1.5:8000 puis Enregistrer.\n\n'
+                              'Ne mets jamais 0.0.0.0 dans l’app.',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.35),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _apiOriginCtrl,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      decoration: const InputDecoration(
-                        hintText: 'http://192.168.x.x:8000',
-                        labelText: 'Origine du serveur (sans /api)',
+                    if (!kIsWeb) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _apiOriginCtrl,
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          hintText: 'http://192.168.x.x:8000',
+                          labelText: 'Origine du serveur (sans /api)',
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _saveApiOrigin,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: accent,
-                              foregroundColor: Colors.white,
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _saveApiOrigin,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: accent,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Enregistrer'),
                             ),
-                            child: const Text('Enregistrer'),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        OutlinedButton(
-                          onPressed: _resetApiOrigin,
-                          child: const Text('Défaut'),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 10),
+                          OutlinedButton(
+                            onPressed: _resetApiOrigin,
+                            child: const Text('Défaut'),
+                          ),
+                        ],
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 10),
+                      SelectableText(
+                        ApiConfig.productionOrigin,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton(
+                        onPressed: _resetApiOrigin,
+                        child: const Text('Réinitialiser l’API cloud'),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
@@ -180,7 +218,7 @@ class _HelpScreenState extends State<HelpScreen> {
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0F4C75)),
                               )
                             : const Icon(Icons.wifi_tethering, size: 20),
-                        label: Text(_testingPing ? 'Test en cours…' : 'Tester la connexion vers le PC'),
+                        label: Text(_testingPing ? 'Test en cours…' : 'Tester la connexion API'),
                       ),
                     ),
                   ],

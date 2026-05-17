@@ -180,9 +180,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _scheduleSilentRetry() {
-    Future<void>.delayed(const Duration(seconds: 2), () {
+    Future<void>.delayed(const Duration(seconds: 2), () async {
       if (!mounted) return;
-      _refresh(silent: true);
+      if (!ApiService.isServerWarm) {
+        await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
+      }
+      if (!mounted) return;
+      _refresh(silent: true, refreshProfile: false);
     });
   }
 
@@ -522,6 +526,11 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
     String? errorMsg;
     try {
+      if (!ApiService.isServerWarm) {
+        await ApiService.ensureBackendReady(
+          maxWait: kIsWeb ? const Duration(seconds: 60) : const Duration(seconds: 25),
+        );
+      }
       final results = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
         ApiService.listRequests(token, force: true),
@@ -575,7 +584,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     }
     setState(() {
       loading = false;
-      lastError = errorMsg;
+      if (errorMsg != null &&
+          requests.isEmpty &&
+          ApiService.isTransientFailure({'status': 0, 'message': errorMsg})) {
+        lastError = null;
+      } else {
+        lastError = errorMsg;
+      }
     });
   }
 
