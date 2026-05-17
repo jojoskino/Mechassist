@@ -512,7 +512,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onTap: () => _editField(
                             'Nom',
                             _nameCtrl,
-                            buildPatch: (v) => {'name': v},
+                            buildPatch: (v) => <String, dynamic>{'name': v},
                           ),
                         ),
                         MechAssistSettingsTile(
@@ -522,7 +522,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             'Téléphone',
                             _phoneCtrl,
                             keyboard: TextInputType.phone,
-                            buildPatch: (v) => {'phone': v.isEmpty ? null : v},
+                            buildPatch: (v) => <String, dynamic>{'phone': v.isEmpty ? null : v},
                           ),
                         ),
                         MechAssistSettingsTile(
@@ -538,7 +538,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               'Spécialités',
                               _specialtyCtrl,
                               maxLines: 3,
-                              buildPatch: (v) => {'mechanic_specialty': v},
+                              buildPatch: (v) => <String, dynamic>{'mechanic_specialty': v},
                             ),
                           ),
                       ],
