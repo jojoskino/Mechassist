@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'api_response_cache.dart';
+import 'live_sync.dart';
 
 /// URL de l’API Laravel. Sur émulateur Android : `10.0.2.2`. Sur téléphone physique :
 /// enregistre l’URL dans **Aide** ([ApiConfig]) ou compile avec `--dart-define=API_BASE_URL=...`.
@@ -497,8 +498,12 @@ class ApiService {
         request.files.add(
           http.MultipartFile.fromBytes('photo', photoBytes, filename: name),
         );
-        final response = await _twMultipart(request);
-        return _normalizeApiResult(_parseBody(response));
+        final body = _normalizeApiResult(_parseBody(await _twMultipart(request)));
+        final stPhoto = body['status'] as int?;
+        if (stPhoto != null && stPhoto >= 200 && stPhoto < 300) {
+          _afterRequestMutation();
+        }
+        return body;
       }
 
       final response = await _tw(() => _client.post(
@@ -513,7 +518,12 @@ class ApiService {
           if (clientAddress != null && clientAddress.trim().isNotEmpty) 'client_address': clientAddress.trim(),
         }),
       ));
-      return _normalizeApiResult(_parseBody(response));
+      final body = _normalizeApiResult(_parseBody(response));
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return _networkFailure(e);
     }
@@ -580,8 +590,23 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> listRequests(String token, {String? status}) async {
+  static void _afterRequestMutation() {
+    ApiResponseCache.invalidateRequestLists();
+    LiveSync.instance.pulse();
+  }
+
+  static Future<Map<String, dynamic>> listRequests(
+    String token, {
+    String? status,
+    bool force = false,
+  }) async {
     try {
+      if (!force) {
+        final cached = ApiResponseCache.requestListIfFresh(token, status: status);
+        if (cached != null) {
+          return {'status': 200, 'data': cached};
+        }
+      }
       var uri = Uri.parse('$_apiRoot/requests');
       if (status != null && status.trim().isNotEmpty) {
         uri = uri.replace(queryParameters: {'status': status.trim()});
@@ -591,7 +616,8 @@ class ApiService {
         headers: _authHeaders(token, json: false),
       ));
       final decoded = _tryJsonDecode(response.body);
-      if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (response.statusCode >= 200 && response.statusCode < 300 && decoded is List) {
+        ApiResponseCache.putRequestList(token, decoded, status: status);
         return {'status': response.statusCode, 'data': decoded};
       }
       final msg = decoded is Map ? decoded['message']?.toString() : null;
@@ -701,7 +727,12 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -714,7 +745,12 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -727,7 +763,12 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -741,7 +782,12 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -759,7 +805,12 @@ class ApiService {
         headers: _authHeaders(token),
         body: jsonEncode({'outcome': outcome}),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        _afterRequestMutation();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }

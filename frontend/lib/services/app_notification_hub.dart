@@ -1,6 +1,8 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import 'live_sync.dart';
+
 /// Notifications in-app (historique + compteur non lues).
 class AppNotificationHub extends ChangeNotifier {
   AppNotificationHub._();
@@ -39,6 +41,7 @@ class AppNotificationHub extends ChangeNotifier {
     }
     unreadCount++;
     notifyListeners();
+    LiveSync.instance.pulse();
   }
 
   void markAllRead() {

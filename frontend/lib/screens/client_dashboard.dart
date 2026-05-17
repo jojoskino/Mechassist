@@ -11,6 +11,7 @@ import '../services/client_config_cache.dart';
 import '../services/refresh_coordinator.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/app_notification_hub.dart';
+import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
 import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
@@ -70,6 +71,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   String _cachedRemoteAvatarSig = '';
   late int _tabIndex;
   Timer? _refreshTimer;
+  Timer? _liveSyncDebounce;
+  int _refreshTick = 0;
+  String _requestsSig = '';
+  DateTime? _lastRequestsFetch;
   StreamSubscription<Position>? _positionSub;
   DateTime? _lastLocationPost;
   String? lastError;
@@ -89,22 +94,60 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     WidgetsBinding.instance.addObserver(this);
     AppNotificationHub.instance.addListener(_onNotificationsChanged);
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
+    LiveSync.instance.addListener(_onLiveSync);
     _mechanicKeywordCtrl.addListener(_onMechanicSearchChanged);
     _applyMemoryCacheInstant();
+    _requestsSig = _signatureForRequests(requests);
     unawaited(_loadPublicConfig());
     unawaited(_refreshAll(requireFreshGps: false));
-    _refreshTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshListsOnly());
+    _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) => _onPeriodicRefresh());
     _syncPush();
     _startPositionTracking();
   }
 
   void _onNotificationsChanged() {
     if (mounted) setState(() {});
+    unawaited(_refreshRequestsOnly(forceNetwork: true));
   }
 
   void _onProfilesExternallyUpdated() {
     if (mounted) setState(() {});
-    _refreshAll(silent: true, requireFreshGps: false);
+    unawaited(_refreshRequestsOnly(forceNetwork: true));
+  }
+
+  void _onLiveSync() {
+    _liveSyncDebounce?.cancel();
+    _liveSyncDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      unawaited(_refreshRequestsOnly(forceNetwork: true));
+    });
+  }
+
+  void _onPeriodicRefresh() {
+    if (!mounted) return;
+    _refreshTick++;
+    if (_refreshTick % 4 == 0) {
+      unawaited(_refreshAll(silent: true, requireFreshGps: false, refreshProfile: false));
+    } else {
+      unawaited(_refreshRequestsOnly());
+    }
+  }
+
+  String _signatureForRequests(List<dynamic> list) {
+    final buf = StringBuffer();
+    for (final raw in list) {
+      final r = raw is Map ? raw : const <String, dynamic>{};
+      buf.write('${r['id']}:${r['status']};');
+    }
+    return buf.toString();
+  }
+
+  bool _applyRequestsList(List<dynamic> next) {
+    final sig = _signatureForRequests(next);
+    if (sig == _requestsSig) return false;
+    _requestsSig = sig;
+    requests = next;
+    return true;
   }
 
   int get _peerAvatarCacheEpoch => Object.hash(_remoteAvatarEpoch, ProfileSignals.instance.generation);
@@ -174,6 +217,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(ApiService.warmServer(wait: false));
       _refreshAll(silent: true, requireFreshGps: false);
     }
   }
@@ -197,6 +241,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _requestSearchCtrl.dispose();
     AppNotificationHub.instance.removeListener(_onNotificationsChanged);
     ProfileSignals.instance.removeListener(_onProfilesExternallyUpdated);
+    LiveSync.instance.removeListener(_onLiveSync);
+    _liveSyncDebounce?.cancel();
     _mechanicKeywordCtrl.removeListener(_onMechanicSearchChanged);
     super.dispose();
   }
@@ -244,9 +290,29 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }).toList();
   }
 
-  /// Rafraîchit mécaniciens + demandes en réutilisant la position déjà connue (rapide).
-  Future<void> _refreshListsOnly() async {
-    await _refreshAll(silent: true, requireFreshGps: false, refreshProfile: false);
+  Future<void> _refreshRequestsOnly({bool forceNetwork = false}) async {
+    final now = DateTime.now();
+    if (!forceNetwork &&
+        _lastRequestsFetch != null &&
+        now.difference(_lastRequestsFetch!) < const Duration(seconds: 4)) {
+      return;
+    }
+    final token = await AuthStorage.getToken();
+    if (token == null || !mounted) return;
+    _lastRequestsFetch = DateTime.now();
+    final reqRes = await ApiService.listRequests(token, force: forceNetwork);
+    if (!mounted) return;
+    final rs = reqRes['status'] as int?;
+    if (rs != null && rs >= 200 && rs < 300 && reqRes['data'] is List) {
+      final changed = _applyRequestsList(List<dynamic>.from(reqRes['data'] as List));
+      if (changed) {
+        unawaited(ApiDataCache.saveRequests(requests, mechanic: false));
+        setState(() {
+          loading = false;
+          _initializing = false;
+        });
+      }
+    }
   }
 
   Future<void> _refreshAll({
@@ -289,7 +355,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
       final batch = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token),
+        ApiService.listRequests(token, force: true),
         !reuseCoords ? _getPositionQuick() : Future<Position?>.value(null),
       ]);
       final me = batch[0] as Map<String, dynamic>;
@@ -353,7 +419,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
       final rs = reqRes['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqRes['data'] is List) {
-        requests = reqRes['data'] as List;
+        _applyRequestsList(List<dynamic>.from(reqRes['data'] as List));
+        _lastRequestsFetch = DateTime.now();
         unawaited(ApiDataCache.saveRequests(requests, mechanic: false));
       } else if (!ApiService.isTransientFailure(reqRes)) {
         requests = [];
@@ -574,7 +641,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         if (addr != null && addr.isNotEmpty) {
           await RecentAddresses.add(addr);
         }
-        await _refreshAll(silent: true, requireFreshGps: false);
+        await _refreshRequestsOnly(forceNetwork: true);
         if (mounted) {
           setState(() => _tabIndex = 2);
         }

@@ -24,6 +24,7 @@ import '../screens/user_profile_page.dart';
 import '../widgets/user_avatar.dart';
 import '../utils/profile_navigation.dart';
 import '../services/app_notification_hub.dart';
+import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
 import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
@@ -39,7 +40,7 @@ class DashboardMecanicien extends StatefulWidget {
   State<DashboardMecanicien> createState() => _DashboardMecanicienState();
 }
 
-class _DashboardMecanicienState extends State<DashboardMecanicien> {
+class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsBindingObserver {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   bool available = false;
   bool loading = false;
@@ -53,6 +54,10 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   String _cachedClientAvatarSig = '';
   Timer? _refreshTimer;
   Timer? _presenceTimer;
+  Timer? _liveSyncDebounce;
+  int _refreshTick = 0;
+  String _requestsSig = '';
+  DateTime? _lastRequestsFetch;
   StreamSubscription<Position>? _positionSub;
   DateTime? _lastLocationPost;
   String? lastError;
@@ -69,15 +74,86 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AppNotificationHub.instance.addListener(_onNotificationsChanged);
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
+    LiveSync.instance.addListener(_onLiveSync);
     _applyMemoryCacheInstant();
+    _requestsSig = _signatureForRequests(requests);
     unawaited(_loadPublicConfig());
     unawaited(_refresh(silent: true));
-    _refreshTimer = Timer.periodic(const Duration(seconds: 40), (_) => _refresh(silent: true));
-    _presenceTimer = Timer.periodic(const Duration(seconds: 90), (_) => _touchPresence());
+    _scheduleRefreshTimer();
+    _schedulePresenceTimer();
     _syncPush();
     _bootstrapLocation();
+  }
+
+  void _scheduleRefreshTimer() {
+    _refreshTimer?.cancel();
+    final interval = available ? const Duration(seconds: 6) : const Duration(seconds: 18);
+    _refreshTimer = Timer.periodic(interval, (_) => _onPeriodicRefresh());
+  }
+
+  void _schedulePresenceTimer() {
+    _presenceTimer?.cancel();
+    final interval = available ? const Duration(seconds: 45) : const Duration(minutes: 2);
+    _presenceTimer = Timer.periodic(interval, (_) => _touchPresence());
+  }
+
+  void _onPeriodicRefresh() {
+    if (!mounted) return;
+    _refreshTick++;
+    if (_refreshTick % 5 == 0) {
+      unawaited(_refresh(silent: true, refreshProfile: true));
+    } else {
+      unawaited(_refreshRequestsOnly(silent: true));
+    }
+  }
+
+  void _onLiveSync() {
+    _liveSyncDebounce?.cancel();
+    _liveSyncDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ApiService.warmServer(wait: false));
+      unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
+    }
+  }
+
+  String _signatureForRequests(List<dynamic> list) {
+    final buf = StringBuffer();
+    for (final raw in list) {
+      final r = raw is Map ? raw : const <String, dynamic>{};
+      buf.write('${r['id']}:${r['status']};');
+    }
+    return buf.toString();
+  }
+
+  bool _applyRequestsList(List<dynamic> next) {
+    final sig = _signatureForRequests(next);
+    if (sig == _requestsSig) return false;
+    _requestsSig = sig;
+    requests = next;
+    return true;
+  }
+
+  void _patchRequestStatusLocally(int id, String status) {
+    final idx = requests.indexWhere((raw) {
+      final r = raw is Map ? raw : const <String, dynamic>{};
+      return ApiService.parseIntId(r['id']) == id;
+    });
+    if (idx < 0) return;
+    final copy = Map<String, dynamic>.from(requests[idx] as Map);
+    copy['status'] = status;
+    final next = List<dynamic>.from(requests);
+    next[idx] = copy;
+    _applyRequestsList(next);
   }
 
   Future<bool> _ensureLocationPermission() async {
@@ -194,7 +270,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   Future<void> _pushLocation(double lat, double lng, {bool force = false}) async {
     final now = DateTime.now();
     final last = _lastLocationPost;
-    if (!force && last != null && now.difference(last) < const Duration(seconds: 30)) {
+    final minGap = available ? const Duration(seconds: 15) : const Duration(seconds: 45);
+    if (!force && last != null && now.difference(last) < minGap) {
       return;
     }
     final token = await AuthStorage.getToken();
@@ -217,11 +294,12 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
 
   void _onNotificationsChanged() {
     if (mounted) setState(() {});
+    unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
   }
 
   void _onProfilesExternallyUpdated() {
     if (mounted) setState(() {});
-    _refresh(silent: true);
+    unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
   }
 
   int get _clientAvatarCacheEpoch => Object.hash(_clientAvatarEpoch, ProfileSignals.instance.generation);
@@ -240,10 +318,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     AppNotificationHub.instance.removeListener(_onNotificationsChanged);
     ProfileSignals.instance.removeListener(_onProfilesExternallyUpdated);
+    LiveSync.instance.removeListener(_onLiveSync);
     _refreshTimer?.cancel();
     _presenceTimer?.cancel();
+    _liveSyncDebounce?.cancel();
     _positionSub?.cancel();
     _requestSearchCtrl.dispose();
     super.dispose();
@@ -371,6 +452,46 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     await _refreshCoordinator.run(() => _refreshBody(silent: silent, refreshProfile: refreshProfile));
   }
 
+  Future<void> _refreshRequestsOnly({bool silent = true, bool forceNetwork = false}) async {
+    final now = DateTime.now();
+    if (!forceNetwork &&
+        _lastRequestsFetch != null &&
+        now.difference(_lastRequestsFetch!) < const Duration(seconds: 4)) {
+      return;
+    }
+    await _refreshCoordinator.run(() async {
+      final token = await AuthStorage.getToken();
+      if (token == null) return;
+      _lastRequestsFetch = DateTime.now();
+      final reqs = await ApiService.listRequests(
+        token,
+        status: _requestStatusFilter,
+        force: forceNetwork,
+      );
+      if (!mounted) return;
+      final rs = reqs['status'] as int?;
+      if (rs != null && rs >= 200 && rs < 300 && reqs['data'] is List) {
+        final changed = _applyRequestsList(List<dynamic>.from(reqs['data'] as List));
+        if (changed) {
+          unawaited(ApiDataCache.saveRequests(requests, mechanic: true));
+          final nextSig = _clientAvatarSignature();
+          if (nextSig != _cachedClientAvatarSig) {
+            _cachedClientAvatarSig = nextSig;
+            _clientAvatarEpoch++;
+          }
+          setState(() {
+            loading = false;
+            lastError = null;
+          });
+        }
+      } else if (!ApiService.isTransientFailure(reqs)) {
+        setState(() {
+          lastError = _messageIfRealError(reqs, 'Impossible de charger les demandes (${reqs['status']}).');
+        });
+      }
+    });
+  }
+
   Future<void> _refreshBody({bool silent = false, bool refreshProfile = true}) async {
     if (!silent) {
       setState(() => loading = true);
@@ -389,7 +510,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     try {
       final results = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token, status: _requestStatusFilter),
+        ApiService.listRequests(token, status: _requestStatusFilter, force: true),
       ]);
       final me = results[0] as Map<String, dynamic>;
       final reqs = results[1] as Map<String, dynamic>;
@@ -419,7 +540,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
 
       final rs = reqs['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqs['data'] is List) {
-        requests = reqs['data'] as List;
+        _applyRequestsList(List<dynamic>.from(reqs['data'] as List));
+        _lastRequestsFetch = DateTime.now();
         unawaited(ApiDataCache.saveRequests(requests, mechanic: true));
       } else if (!ApiService.isTransientFailure(reqs)) {
         requests = [];
@@ -491,22 +613,26 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     }
     if (!mounted) return;
     setState(() => _availabilityBusy = false);
+    _scheduleRefreshTimer();
+    _schedulePresenceTimer();
   }
 
   Future<void> _processRequest(int id, bool accept, Map<String, dynamic> request) async {
     final token = await AuthStorage.getToken();
     if (token == null) return;
+    _patchRequestStatusLocally(id, accept ? 'accepted' : 'declined');
+    if (mounted) setState(() {});
     final res = accept ? await ApiService.acceptRequest(token, id) : await ApiService.declineRequest(token, id);
     if (!mounted) return;
     final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res['message']?.toString() ?? 'Action impossible')),
+        SnackBar(content: Text(ApiService.userFacingMessage(res, fallback: 'Action impossible'))),
       );
-      await _refresh(silent: true);
+      await _refreshRequestsOnly(silent: true, forceNetwork: true);
       return;
     }
-    await _refresh(silent: true);
+    unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
     if (!accept || !mounted) return;
 
     final clat = (request['client_lat'] as num?)?.toDouble();
@@ -703,7 +829,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
           selected: _requestStatusFilter == e.$1,
           onTap: () {
             setState(() => _requestStatusFilter = e.$1);
-            _refresh(silent: true);
+            unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
           },
         ),
     ];

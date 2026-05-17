@@ -33,6 +33,34 @@ class ApiResponseCache {
     _meAt = null;
   }
 
+  static final _requestLists = <String, List<dynamic>>{};
+  static final _requestListsAt = <String, DateTime>{};
+  static const _requestListTtl = Duration(seconds: 3);
+
+  static String _requestListKey(String token, String? status) =>
+      '$token|${status?.trim() ?? ''}';
+
+  static List<dynamic>? requestListIfFresh(String token, {String? status}) {
+    final key = _requestListKey(token, status);
+    final at = _requestListsAt[key];
+    if (at == null || DateTime.now().difference(at) > _requestListTtl) {
+      return null;
+    }
+    final list = _requestLists[key];
+    return list == null ? null : List<dynamic>.from(list);
+  }
+
+  static void putRequestList(String token, List<dynamic> data, {String? status}) {
+    final key = _requestListKey(token, status);
+    _requestLists[key] = List<dynamic>.from(data);
+    _requestListsAt[key] = DateTime.now();
+  }
+
+  static void invalidateRequestLists() {
+    _requestLists.clear();
+    _requestListsAt.clear();
+  }
+
   static List<dynamic>? messagesIfFresh(int requestId) {
     final at = _messagesAt[requestId];
     if (at == null || DateTime.now().difference(at) > _messagesTtl) return null;
@@ -64,6 +92,7 @@ class ApiResponseCache {
 
   static void clear() {
     invalidateMe();
+    invalidateRequestLists();
     _messages.clear();
     _messagesAt.clear();
     _requests.clear();
