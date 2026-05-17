@@ -129,6 +129,8 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
   late String? _pickupLabel;
   bool _refreshingLocation = false;
   XFile? _photo;
+  // PERF: Bytes chargés une seule fois (pas de readAsBytes dans build).
+  Future<Uint8List>? _photoBytesFuture;
   final _picker = ImagePicker();
 
   static const _maxDesc = 500;
@@ -140,7 +142,13 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
     if (widget.initialDescription != null && widget.initialDescription!.isNotEmpty) {
       _descCtrl.text = widget.initialDescription!;
     }
-    _descCtrl.addListener(() => setState(() {}));
+  }
+
+  void _setPhoto(XFile? file) {
+    setState(() {
+      _photo = file;
+      _photoBytesFuture = file?.readAsBytes();
+    });
   }
 
   @override
@@ -195,7 +203,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
       maxHeight: 2048,
       imageQuality: 85,
     );
-    if (x != null) setState(() => _photo = x);
+    if (x != null) _setPhoto(x);
   }
 
   List<Widget> _formChildren(BuildContext context, {required bool showTopBar}) {
@@ -466,7 +474,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
   }
 
   Widget _descriptionField() {
-    final len = _descCtrl.text.length;
+    // PERF: Rebuild uniquement le compteur de caractères, pas toute la feuille.
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -488,15 +496,20 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
               contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12, bottom: 8),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                '$len/$_maxDesc',
-                style: AppFonts.style(fontSize: 12, color: Colors.grey.shade500),
-              ),
-            ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _descCtrl,
+            builder: (context, value, _) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 12, bottom: 8),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    '${value.text.length}/$_maxDesc',
+                    style: AppFonts.style(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -551,7 +564,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: FutureBuilder<Uint8List>(
-                    future: _photo!.readAsBytes(),
+                    future: _photoBytesFuture,
                     builder: (context, snap) {
                       if (!snap.hasData) {
                         return const ColoredBox(
@@ -572,7 +585,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
                   top: 4,
                   right: 4,
                   child: GestureDetector(
-                    onTap: () => setState(() => _photo = null),
+                    onTap: () => _setPhoto(null),
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
