@@ -22,4 +22,4 @@ Write-Host "Appareils Flutter :" -ForegroundColor Cyan
 & flutter devices
 Write-Host ""
 Write-Host "Lancement (Ctrl+C pour arreter)..." -ForegroundColor Cyan
-& flutter run --dart-define=API_BASE_URL=https://mechassist-api.onrender.com
+& flutter run --dart-define=API_BASE_URL=https://both-lapping-umpire.ngrok-free.dev

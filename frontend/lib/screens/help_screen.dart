@@ -68,7 +68,7 @@ class _HelpScreenState extends State<HelpScreen> {
                   ? 'Connexion OK vers ${ApiConfig.productionOrigin}.'
                   : 'Connexion OK : le téléphone atteint le serveur.')
               : (kIsWeb
-                  ? 'Échec : le serveur cloud met du temps à réveiller. Réessayez dans 1 minute.'
+                  ? 'Échec : vérifiez que ngrok et Laravel (port 8000) tournent sur le PC.'
                   : 'Échec : vérifie l’URL ci-dessus, le pare-feu Windows et php artisan serve --host=0.0.0.0'),
         ),
         backgroundColor: ok ? Colors.green.shade800 : Colors.red.shade800,
@@ -123,7 +123,7 @@ class _HelpScreenState extends State<HelpScreen> {
       SnackBar(
         content: Text(
           kIsWeb
-              ? 'API cloud Render rétablie.'
+              ? 'API tunnel rétablie.'
               : 'URL par défaut rétablie (émulateur / machine locale).',
         ),
       ),
@@ -156,8 +156,8 @@ class _HelpScreenState extends State<HelpScreen> {
                     const SizedBox(height: 6),
                     Text(
                       kIsWeb
-                          ? 'Sur le navigateur, l’app utilise l’API Render :\n${ApiConfig.productionOrigin}\n\n'
-                              'Le premier chargement peut prendre 1–2 min si le serveur était en veille.'
+                          ? 'Sur le navigateur, l’app utilise le tunnel ngrok :\n${ApiConfig.productionOrigin}\n\n'
+                              'Le PC doit avoir Laravel (port 8000) et ngrok actifs.'
                           : 'Sur un vrai téléphone, l’émulateur par défaut (10.0.2.2) ne marche pas. '
                               'Mets l’IP LAN de ton PC, ex. http://192.168.1.5:8000 puis Enregistrer.\n\n'
                               'Ne mets jamais 0.0.0.0 dans l’app.',

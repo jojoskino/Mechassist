@@ -22,7 +22,7 @@ class ApiService {
     if (stored != null && stored.isNotEmpty) {
       return '${stored.replaceAll(RegExp(r'/+$'), '')}/api';
     }
-    // Web + mobile : API Render par défaut (localhost uniquement si surcharge dans Aide ou dart-define).
+    // Web + mobile : origine production par défaut (surcharge Aide ou dart-define).
     return '${ApiConfig.productionOrigin}/api';
   }
 
@@ -51,7 +51,7 @@ class ApiService {
 
   static bool get isServerWarm => _serverWarm;
 
-  /// Réveille Render. [wait] : attendre que le serveur réponde (splash / login).
+  /// Vérifie que le backend répond. [wait] : attendre (splash / login).
   static Future<bool> warmServer({bool wait = true}) {
     if (_serverWarm && !wait) return Future.value(true);
     _warming ??= _doWarm();
@@ -60,7 +60,7 @@ class ApiService {
     return f;
   }
 
-  /// Attend que le backend réponde (cold start Render, surtout Web).
+  /// Attend que le backend réponde (réseau lent ou serveur froid).
   static Future<bool> ensureBackendReady({
     Duration maxWait = const Duration(seconds: 120),
   }) async {
@@ -96,7 +96,12 @@ class ApiService {
     final origin = serverOrigin.replaceAll(RegExp(r'/+$'), '');
     final checks = ['/api/health', '/up'].map((path) async {
       try {
-        final response = await _client.get(Uri.parse('$origin$path')).timeout(timeout);
+        final response = await _client
+            .get(
+              Uri.parse('$origin$path'),
+              headers: _publicJsonHeaders(json: false),
+            )
+            .timeout(timeout);
         return response.statusCode == 200;
       } catch (_) {
         return false;
@@ -142,7 +147,7 @@ class ApiService {
     return fallback;
   }
 
-  /// Erreur réseau transitoire (cold start Render) — ne pas afficher à l’utilisateur.
+  /// Erreur réseau transitoire — ne pas afficher à l’utilisateur.
   static bool isTransientFailure(Map<String, dynamic> res) {
     if (res['transient'] == true) return true;
     final status = res['status'] as int? ?? res['http_status'] as int?;
@@ -310,7 +315,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/client-config'),
-        headers: const {'Accept': 'application/json'},
+        headers: _publicJsonHeaders(json: false),
       ));
       return _parseBody(response);
     } catch (e) {
@@ -326,10 +331,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/auth/google'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: _publicJsonHeaders(),
         body: jsonEncode({
           'id_token': idToken,
           if (role != null && role.isNotEmpty) 'role': role,
@@ -350,10 +352,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/login'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: _publicJsonHeaders(),
         body: jsonEncode({
           'email': email,
           'password': password,
@@ -379,10 +378,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/register'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: _publicJsonHeaders(),
         body: jsonEncode({
           'name': name,
           'email': email,
@@ -405,11 +401,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/logout'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: _authHeaders(token),
       ));
       return _parseBody(response);
     } catch (e) {
@@ -425,11 +417,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/me'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: _authHeaders(token),
       ));
       final body = _parseBody(response);
       final st = body['status'] as int?;
@@ -442,10 +430,27 @@ class ApiService {
     }
   }
 
+  /// En-têtes pour images réseau (ngrok free).
+  static Map<String, String> get imageRequestHeaders =>
+      ApiConfig.ngrokHeadersFor(serverOrigin);
+
+  static Map<String, String> _publicJsonHeaders({bool json = true}) {
+    return {
+      if (json) 'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      ...ApiConfig.ngrokHeadersFor(serverOrigin),
+    };
+  }
+
+  static void _applyTunnelHeaders(http.BaseRequest request) {
+    request.headers.addAll(ApiConfig.ngrokHeadersFor(serverOrigin));
+  }
+
   static Map<String, String> _authHeaders(String token, {bool json = true}) {
     return {
       if (json) 'Content-Type': 'application/json',
       'Accept': 'application/json',
+      ...ApiConfig.ngrokHeadersFor(serverOrigin),
       'Authorization': 'Bearer $token',
     };
   }
@@ -521,6 +526,7 @@ class ApiService {
         final request = http.MultipartRequest('POST', Uri.parse('$_apiRoot/requests'));
         request.headers['Accept'] = 'application/json';
         request.headers['Authorization'] = 'Bearer $token';
+        _applyTunnelHeaders(request);
         request.fields['mechanic_id'] = mechanicId.toString();
         request.fields['vehicle_type'] = vehicleType;
         request.fields['description'] = description;
@@ -592,10 +598,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/forgot-password'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: _publicJsonHeaders(),
         body: jsonEncode({'email': email.trim()}),
       ));
       return _parseBody(response);
@@ -613,10 +616,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/reset-password'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: _publicJsonHeaders(),
         body: jsonEncode({
           'email': email.trim(),
           'token': token.trim(),
@@ -683,10 +683,7 @@ class ApiService {
     try {
       final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/requests/$id'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: _authHeaders(token, json: false),
       ));
       final code = response.statusCode;
       final raw = response.body;
@@ -745,6 +742,7 @@ class ApiService {
       final request = http.MultipartRequest('PATCH', Uri.parse('$_apiRoot/profile'));
       request.headers['Accept'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
+      _applyTunnelHeaders(request);
       request.files.add(http.MultipartFile.fromBytes('avatar', bytes, filename: filename));
       final response = await _twMultipart(request);
       return _parseBody(response);
@@ -932,6 +930,7 @@ class ApiService {
       );
       request.headers['Accept'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
+      _applyTunnelHeaders(request);
       request.fields['message_type'] = messageType;
       if (caption != null && caption.trim().isNotEmpty) {
         request.fields['body'] = caption.trim();

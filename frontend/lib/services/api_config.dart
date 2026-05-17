@@ -7,8 +7,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiConfig {
   ApiConfig._();
 
-  /// API production Render (téléphone / tablette par défaut).
-  static const String productionOrigin = 'https://mechassist-api.onrender.com';
+  /// API par défaut (tunnel ngrok → Laravel local).
+  static const String productionOrigin = 'https://both-lapping-umpire.ngrok-free.dev';
+
+  static const String _legacyRenderOrigin = 'https://mechassist-api.onrender.com';
+
+  /// En-tête requis par ngrok free pour éviter la page d’avertissement navigateur.
+  static Map<String, String> ngrokHeadersFor(String origin) {
+    try {
+      final host = Uri.parse(origin).host.toLowerCase();
+      if (host.contains('ngrok')) {
+        return const {'ngrok-skip-browser-warning': 'true'};
+      }
+    } catch (_) {}
+    return const {};
+  }
 
   static const String _prefsKey = 'mechassist_api_base_url';
   static const String _defaultSeededKey = 'mechassist_api_default_seeded';
@@ -26,9 +39,12 @@ class ApiConfig {
       await prefs.remove(_prefsKey);
     }
     _override = normalized;
+    if (_override == _legacyRenderOrigin) {
+      await setBaseUrlOverride(productionOrigin);
+    }
   }
 
-  /// Premier lancement : pointe vers l’API Render (Web + mobile ; évite localhost / 10.0.2.2).
+  /// Premier lancement : pointe vers l’API tunnel (Web + mobile ; évite localhost / 10.0.2.2).
   static Future<void> ensureProductionDefault() async {
     await load();
     const fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
@@ -39,7 +55,7 @@ class ApiConfig {
       return;
     }
 
-    // Web : toujours Render (localhost enregistré dans Aide ne fonctionne pas).
+    // Web : toujours l’origine production (localhost enregistré dans Aide ne fonctionne pas).
     if (kIsWeb) {
       if (_override != productionOrigin) {
         await setBaseUrlOverride(productionOrigin);

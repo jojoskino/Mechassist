@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'api_service.dart';
 
-/// PERF: Plus de ping périodique Render — réveil uniquement au besoin (splash, login, reprise app).
+/// PERF: Plus de ping périodique — réveil uniquement au besoin (splash, login, reprise app).
 class ApiKeepAlive with WidgetsBindingObserver {
   ApiKeepAlive._();
   static final ApiKeepAlive instance = ApiKeepAlive._();

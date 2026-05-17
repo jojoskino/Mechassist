@@ -37,6 +37,7 @@ class PublicNetworkImage extends StatelessWidget {
     Widget imageBuilder(double w, double h) {
       return Image.network(
         resolved,
+        headers: ApiService.imageRequestHeaders,
         width: w.isFinite ? w : null,
         height: h,
         fit: fit,

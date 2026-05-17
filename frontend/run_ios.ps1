@@ -8,5 +8,5 @@ Write-Host ""
 Write-Host "Appareils Flutter :" -ForegroundColor Cyan
 & flutter devices
 Write-Host ""
-Write-Host "Lancement iOS (API Render)..." -ForegroundColor Cyan
-& flutter run --dart-define=API_BASE_URL=https://mechassist-api.onrender.com
+Write-Host "Lancement iOS (API ngrok)..." -ForegroundColor Cyan
+& flutter run --dart-define=API_BASE_URL=https://both-lapping-umpire.ngrok-free.dev

@@ -1,10 +1,10 @@
-# MechAssist — Web (navigateur) avec API Render par défaut.
+# MechAssist — Web (navigateur) avec API ngrok par défaut.
 # Choisit un port libre (évite l'erreur 10048 si 8120 est déjà pris).
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$apiUrl = "https://mechassist-api.onrender.com"
+$apiUrl = "https://both-lapping-umpire.ngrok-free.dev"
 if ($env:API_BASE_URL) {
     $apiUrl = $env:API_BASE_URL.TrimEnd('/')
 }
