@@ -530,7 +530,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
       final addr = result.address?.trim() ?? '';
       setState(() => _sendingRequest = true);
-      final res = await ApiService.createRequest(
+      var res = await ApiService.createRequest(
         token: token,
         mechanicId: mechanicId,
         vehicleType: vehicleType,
@@ -541,16 +541,32 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         photoBytes: photoBytes,
         photoFilename: photoFilename,
       );
+      if (ApiService.isTransientFailure(res)) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        res = await ApiService.createRequest(
+          token: token,
+          mechanicId: mechanicId,
+          vehicleType: vehicleType,
+          description: desc,
+          clientLat: lat!,
+          clientLng: lng!,
+          clientAddress: addr.isEmpty ? null : addr,
+          photoBytes: photoBytes,
+          photoFilename: photoFilename,
+        );
+      }
 
       if (!mounted) return;
       final code = res['status'] as int?;
       final ok = code != null && code >= 200 && code < 300;
+      final msg = ok
+          ? 'Demande envoyée au mécanicien.'
+          : ApiService.userFacingMessage(res, fallback: 'Impossible d’envoyer la demande (${code ?? '—'}).');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            ok ? 'Demande envoyée au mécanicien.' : (res['message']?.toString() ?? 'Erreur (${code ?? '—'})'),
-          ),
+          content: Text(msg),
           backgroundColor: ok ? null : Colors.red.shade800,
+          duration: Duration(seconds: ok ? 3 : 5),
         ),
       );
       if (ok) {

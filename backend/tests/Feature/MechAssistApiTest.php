@@ -87,6 +87,34 @@ class MechAssistApiTest extends TestCase
             ->assertJsonFragment(['status' => 'pending']);
     }
 
+    public function test_client_can_create_request_for_available_mechanic_without_recent_ping(): void
+    {
+        $mechanic = User::factory()->create([
+            'role' => 'mecanicien',
+            'is_available' => true,
+            'last_seen_at' => now()->subHours(2),
+            'latitude' => 48.8566,
+            'longitude' => 2.3522,
+        ]);
+        $client = User::factory()->create([
+            'role' => 'client',
+            'password' => Hash::make('secret12'),
+        ]);
+
+        $token = $client->createToken('t')->plainTextToken;
+
+        $this->postJson('/api/requests', [
+            'mechanic_id' => $mechanic->id,
+            'vehicle_type' => 'moto',
+            'description' => 'Panne moteur',
+            'client_lat' => 48.85,
+            'client_lng' => 2.35,
+        ], [
+            'Authorization' => 'Bearer '.$token,
+        ])->assertCreated()
+            ->assertJsonFragment(['status' => 'pending']);
+    }
+
     public function test_client_cannot_close_until_mechanic_marks_complete(): void
     {
         $mechanic = User::factory()->create([

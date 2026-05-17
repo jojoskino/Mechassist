@@ -67,7 +67,8 @@ class User extends Authenticatable implements CanResetPasswordContract
     }
 
     /**
-     * Même logique que la liste « mécaniciens proches » : dispo + activité récente.
+     * Peut recevoir une demande : dispo + (activité récente ou position connue).
+     * Aligné avec la carte « mécaniciens proches ».
      */
     public function isReachableMechanic(?\DateTimeInterface $since = null): bool
     {
@@ -76,10 +77,13 @@ class User extends Authenticatable implements CanResetPasswordContract
         }
         $cutoff = $since !== null
             ? \Illuminate\Support\Carbon::instance(\DateTimeImmutable::createFromInterface($since))
-            : now()->subMinutes(5);
+            : now()->subMinutes(15);
         $seen = $this->last_seen_at ?? $this->last_location_at;
+        if ($seen !== null && $seen->gte($cutoff)) {
+            return true;
+        }
 
-        return $seen !== null && $seen->gte($cutoff);
+        return $this->latitude !== null && $this->longitude !== null;
     }
 
     public function getAvatarUrlAttribute(): ?string

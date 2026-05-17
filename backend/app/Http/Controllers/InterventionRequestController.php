@@ -111,21 +111,26 @@ class InterventionRequestController extends Controller
         };
         $descPreview = mb_substr((string) $row->description, 0, 100);
 
-        $this->fcmService->sendToToken(
-            $mechanic->fcm_token,
-            'Nouvelle demande · '.$clientName,
-            $vehicle.' — '.$descPreview,
-            [
-                'type' => 'request_created',
-                'request_id' => (string) $row->id,
-                'sender_name' => $clientName,
-                'message_preview' => $descPreview,
-            ]
-        );
+        $payload = $this->transform($row);
+        $mechanicToken = $mechanic->fcm_token;
+        $requestId = $row->id;
 
-        $this->firestoreSync->syncInterventionRequest($row);
+        dispatch(function () use ($mechanicToken, $clientName, $vehicle, $descPreview, $requestId, $row): void {
+            app(FcmService::class)->sendToToken(
+                $mechanicToken,
+                'Nouvelle demande · '.$clientName,
+                $vehicle.' — '.$descPreview,
+                [
+                    'type' => 'request_created',
+                    'request_id' => (string) $requestId,
+                    'sender_name' => $clientName,
+                    'message_preview' => $descPreview,
+                ]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row);
+        })->afterResponse();
 
-        return response()->json($this->transform($row), 201);
+        return response()->json($payload, 201);
     }
 
     public function show(Request $request, int $id)

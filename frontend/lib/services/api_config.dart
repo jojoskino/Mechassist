@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// URL de base Laravel **sans** le suffixe `/api` (ex. `http://192.168.1.10:8000`).
@@ -30,11 +31,27 @@ class ApiConfig {
   /// Premier lancement : pointe vers l’API Render (Web + mobile ; évite localhost / 10.0.2.2).
   static Future<void> ensureProductionDefault() async {
     await load();
+    if (!kIsWeb && _override != null && _isEmulatorOnlyHost(_override!)) {
+      await setBaseUrlOverride(productionOrigin);
+    }
     if (_override != null && _override!.isNotEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_defaultSeededKey) == true) return;
     await setBaseUrlOverride(productionOrigin);
     await prefs.setBool(_defaultSeededKey, true);
+  }
+
+  /// Hôtes valides sur émulateur mais pas sur un téléphone physique.
+  static bool _isEmulatorOnlyHost(String origin) {
+    try {
+      final host = Uri.parse(origin).host.toLowerCase();
+      return host == '10.0.2.2' ||
+          host == '127.0.0.1' ||
+          host == 'localhost' ||
+          host == '0.0.0.0';
+    } catch (_) {
+      return false;
+    }
   }
 
   static String? _normalizeStored(String? raw) {

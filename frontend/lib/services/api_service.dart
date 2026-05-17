@@ -204,8 +204,10 @@ class ApiService {
     }
   }
 
-  static const Duration _httpTimeoutWarm = Duration(seconds: 14);
-  static const Duration _httpTimeoutCold = Duration(seconds: 22);
+  static const Duration _httpTimeoutWarm = Duration(seconds: 18);
+  static const Duration _httpTimeoutCold = Duration(seconds: 35);
+  static const Duration _uploadTimeoutWarm = Duration(seconds: 45);
+  static const Duration _uploadTimeoutCold = Duration(seconds: 60);
 
   static const _transientBody = '{"message":"","transient":true}';
 
@@ -237,16 +239,25 @@ class ApiService {
       code == 408 || code == 502 || code == 503 || code == 504;
 
   static Future<http.Response> _twMultipart(http.BaseRequest request) async {
-    final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) await Future<void>.delayed(const Duration(milliseconds: 400));
+    final attempts = _serverWarm ? 2 : 3;
+    final timeout = _serverWarm ? _uploadTimeoutWarm : _uploadTimeoutCold;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) {
+        unawaited(warmServer(wait: false));
+        await Future<void>.delayed(Duration(milliseconds: 500 + attempt * 300));
+      }
       try {
         final streamed = await _client.send(request).timeout(timeout);
         final response = await http.Response.fromStream(streamed).timeout(timeout);
-        if (_shouldRetryStatus(response.statusCode) && attempt == 0) continue;
+        if (_shouldRetryStatus(response.statusCode) && attempt < attempts - 1) {
+          continue;
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          _serverWarm = true;
+        }
         return response;
       } on TimeoutException {
-        if (attempt == 0) continue;
+        if (attempt < attempts - 1) continue;
       }
     }
     return http.Response(_transientBody, 408, headers: {'content-type': 'application/json'});
@@ -466,6 +477,7 @@ class ApiService {
     String? photoFilename,
   }) async {
     try {
+      await warmServer(wait: true);
       final hasPhoto = photoBytes != null && photoBytes.isNotEmpty;
       if (hasPhoto) {
         final request = http.MultipartRequest('POST', Uri.parse('$_apiRoot/requests'));
@@ -486,7 +498,7 @@ class ApiService {
           http.MultipartFile.fromBytes('photo', photoBytes, filename: name),
         );
         final response = await _twMultipart(request);
-        return _parseBody(response);
+        return _normalizeApiResult(_parseBody(response));
       }
 
       final response = await _tw(() => _client.post(
@@ -501,10 +513,29 @@ class ApiService {
           if (clientAddress != null && clientAddress.trim().isNotEmpty) 'client_address': clientAddress.trim(),
         }),
       ));
-      return _parseBody(response);
+      return _normalizeApiResult(_parseBody(response));
     } catch (e) {
-      return {'status': 0, 'message': 'Erreur réseau : $e'};
+      return _networkFailure(e);
     }
+  }
+
+  static Map<String, dynamic> _normalizeApiResult(Map<String, dynamic> body) {
+    final status = body['status'] as int?;
+    if (status == 408 && body['transient'] == true) {
+      return {
+        ...body,
+        'message': userFacingMessage(body, fallback: 'Le serveur met du temps à répondre. Réessayez.'),
+      };
+    }
+    return body;
+  }
+
+  static Map<String, dynamic> _networkFailure(Object e) {
+    final origin = serverOrigin;
+    return {
+      'status': 0,
+      'message': 'Connexion impossible ($origin). Vérifiez le réseau ou l’URL dans Aide. Détail : $e',
+    };
   }
 
   static Future<Map<String, dynamic>> forgotPassword(String email) async {
