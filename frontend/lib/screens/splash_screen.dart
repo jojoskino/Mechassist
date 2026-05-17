@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/session_role.dart';
 import '../services/push_sync.dart';
 import '../utils/gps_position_tracker.dart';
 import 'welcome_screen.dart';
@@ -45,14 +46,22 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    // Session locale : le tableau de bord charge le profil (évite un getMe bloquant au démarrage).
-    final role = session['role'] ?? 'client';
+    final role = await _roleFromApi(token, session['role'] ?? 'client');
     if (!mounted) return;
     Navigator.pushReplacementNamed(
       context,
       role == 'mecanicien' ? '/mecanicien' : '/client',
     );
     Future<void>.microtask(() => PushSync.syncToken());
+  }
+
+  Future<String> _roleFromApi(String token, String fallback) async {
+    final me = await ApiService.getMe(token);
+    final apiRole = SessionRole.roleFromMe(me);
+    if (apiRole == null) return fallback;
+    final name = (await AuthStorage.getSessionFields())['name'] ?? '';
+    await AuthStorage.save(token: token, role: apiRole, name: name);
+    return apiRole;
   }
 
   Future<void> _warmBackendInBackground() async {

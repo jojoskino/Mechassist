@@ -36,7 +36,7 @@ class InterventionRequestController extends Controller
             'mechanicRating',
         ]);
 
-        if ($user->role === 'client') {
+        if ($user->isClient()) {
             $q->where('client_id', $user->id);
         } else {
             $q->where('mechanic_id', $user->id);
@@ -53,8 +53,11 @@ class InterventionRequestController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user()->role !== 'client') {
-            return response()->json(['message' => 'Seuls les clients peuvent créer une demande.'], 403);
+        if (! $request->user()->isClient()) {
+            return response()->json([
+                'message' => 'Seuls les clients peuvent créer une demande.',
+                'role' => $request->user()->role,
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -150,7 +153,7 @@ class InterventionRequestController extends Controller
      */
     public function recordOutcome(Request $request, int $id)
     {
-        if ($request->user()->role !== 'client') {
+        if (! $request->user()->isClient()) {
             return response()->json(['message' => 'Seuls les clients peuvent clôturer une demande.'], 403);
         }
 
@@ -199,7 +202,7 @@ class InterventionRequestController extends Controller
      */
     public function storeRating(Request $request, int $id)
     {
-        if ($request->user()->role !== 'client') {
+        if (! $request->user()->isClient()) {
             return response()->json(['message' => 'Seuls les clients peuvent noter.'], 403);
         }
 
@@ -365,7 +368,7 @@ class InterventionRequestController extends Controller
      */
     public function cancel(Request $request, int $id)
     {
-        if ($request->user()->role !== 'client') {
+        if (! $request->user()->isClient()) {
             return response()->json(['message' => 'Seuls les clients peuvent annuler une demande.'], 403);
         }
 

@@ -19,6 +19,7 @@ import '../utils/gps_helper.dart';
 import '../utils/api_perf.dart';
 import '../utils/gps_position_tracker.dart';
 import '../services/api_keep_alive.dart';
+import '../services/session_role.dart';
 import '../utils/list_search.dart';
 import '../utils/phone_launch.dart';
 import '../widgets/dashboard_search_bar.dart';
@@ -105,11 +106,18 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _mechanicKeywordCtrl.addListener(_onMechanicSearchChanged);
     _applyMemoryCacheInstant();
     _requestsSig = _signatureForRequests(requests);
-    unawaited(_loadPublicConfig());
-    unawaited(_refreshAll(requireFreshGps: false));
+    unawaited(_bootstrapClient());
     _scheduleRefreshTimer();
     _syncPush();
     _startPositionTracking();
+  }
+
+  Future<void> _bootstrapClient() async {
+    await _loadPublicConfig();
+    if (!mounted) return;
+    if (!await SessionRole.ensureClientOnDashboard(context)) return;
+    if (!mounted) return;
+    await _refreshAll(requireFreshGps: false);
   }
 
   void _onNotificationsChanged() {
@@ -256,6 +264,15 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   String? _messageIfRealError(Map<String, dynamic> res, String fallback) {
     if (ApiService.isTransientFailure(res)) return null;
     return res['message']?.toString() ?? fallback;
+  }
+
+  String _createRequestErrorMessage(Map<String, dynamic> res, int? code) {
+    final raw = res['message']?.toString() ?? '';
+    if (code == 403 && raw.toLowerCase().contains('clients')) {
+      return 'Ce compte n’est pas un compte client. Déconnecte-toi et connecte-toi avec '
+          'client@mechassist.local ou crée un compte « Client » à l’inscription.';
+    }
+    return ApiService.userFacingMessage(res, fallback: 'Impossible d’envoyer la demande (${code ?? '—'}).');
   }
 
   Future<void> _loadPublicConfig() async {
@@ -455,6 +472,18 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
           final name = me['name']?.toString();
           if (name != null && name.isNotEmpty) currentName = name;
+          final apiRole = SessionRole.roleFromMe(me);
+          if (apiRole != null) {
+            currentRole = apiRole;
+            if (apiRole == 'mecanicien') {
+              if (!mounted) return;
+              await SessionRole.ensureClientOnDashboard(context);
+              return;
+            }
+            if (apiRole == 'client') {
+              await AuthStorage.save(token: token, role: 'client', name: currentName);
+            }
+          }
         }
       }
       if (position != null) {
@@ -659,6 +688,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       if (result == null) {
         return;
       }
+      if (!mounted) return;
+      if (!await SessionRole.ensureClientOnDashboard(context)) return;
+
       final token = await AuthStorage.getToken();
       if (token == null) {
         return;
@@ -718,7 +750,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       final ok = code != null && code >= 200 && code < 300;
       final msg = ok
           ? 'Demande envoyée au mécanicien.'
-          : ApiService.userFacingMessage(res, fallback: 'Impossible d’envoyer la demande (${code ?? '—'}).');
+          : _createRequestErrorMessage(res, code);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msg),

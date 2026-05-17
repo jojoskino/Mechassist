@@ -66,13 +66,28 @@ class User extends Authenticatable implements CanResetPasswordContract
         return $this->hasMany(MechanicRating::class, 'mechanic_id');
     }
 
+    public function normalizedRole(): string
+    {
+        return strtolower(trim((string) ($this->role ?? '')));
+    }
+
+    public function isClient(): bool
+    {
+        return $this->normalizedRole() === 'client';
+    }
+
+    public function isMechanic(): bool
+    {
+        return $this->normalizedRole() === 'mecanicien';
+    }
+
     /**
      * Peut recevoir une demande : dispo + (activité récente ou position connue).
      * Aligné avec la carte « mécaniciens proches ».
      */
     public function isReachableMechanic(?\DateTimeInterface $since = null): bool
     {
-        if ($this->role !== 'mecanicien' || ! $this->is_available) {
+        if (! $this->isMechanic() || ! $this->is_available) {
             return false;
         }
         $cutoff = $since !== null

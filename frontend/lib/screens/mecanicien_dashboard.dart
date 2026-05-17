@@ -16,6 +16,7 @@ import '../utils/gps_helper.dart';
 import '../utils/api_perf.dart';
 import '../utils/gps_position_tracker.dart';
 import '../services/api_keep_alive.dart';
+import '../services/session_role.dart';
 import '../utils/list_search.dart';
 import '../utils/phone_launch.dart';
 import '../widgets/intervention_locations_map.dart';
@@ -85,12 +86,19 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     LiveSync.instance.addListener(_onLiveSync);
     _applyMemoryCacheInstant();
     _requestsSig = _signatureForRequests(requests);
-    unawaited(_loadPublicConfig());
-    unawaited(_refresh(silent: true));
+    unawaited(_bootstrapMechanic());
     _scheduleRefreshTimer();
     _schedulePresenceTimer();
     _syncPush();
     _bootstrapLocation();
+  }
+
+  Future<void> _bootstrapMechanic() async {
+    await _loadPublicConfig();
+    if (!mounted) return;
+    if (!await SessionRole.ensureMechanicOnDashboard(context)) return;
+    if (!mounted) return;
+    await _refresh(silent: true);
   }
 
   void _scheduleRefreshTimer() {
