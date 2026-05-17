@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
+import '../utils/api_perf.dart';
 import '../services/auth_storage.dart';
 import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
@@ -74,11 +75,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => isLoading = true);
     if (!ApiService.isServerWarm) {
-      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 90));
+      await ApiService.ensureBackendReady(
+        maxWait: ApiPerf.loginReadyMaxWait(ApiService.serverOrigin),
+      );
     }
     var res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     if (ApiService.isTransientFailure(res)) {
-      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
+      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 3));
       res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     }
     if (!mounted) return;

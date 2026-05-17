@@ -33,10 +33,8 @@ class InterventionRequestController extends Controller
         $q = InterventionRequest::query()->with([
             'client:id,name,phone,avatar_path,last_seen_at,last_location_at,role',
             'mechanic:id,name,phone,mechanic_specialty,is_available,avatar_path,last_seen_at,last_location_at,role',
+            'mechanicRating',
         ]);
-        if (($validated['status'] ?? null) === 'completed') {
-            $q->with('mechanicRating');
-        }
 
         if ($user->role === 'client') {
             $q->where('client_id', $user->id);
@@ -178,16 +176,22 @@ class InterventionRequestController extends Controller
 
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone', 'mechanicRating']);
 
-        $this->fcmService->sendToToken(
-            $row->mechanic?->fcm_token,
-            'Intervention clôturée',
-            'Le client a indiqué que la panne était '.($validated['outcome'] === 'fixed' ? 'réglée' : 'non réglée').'.',
-            ['type' => 'request_completed', 'request_id' => (string) $row->id]
-        );
+        $payload = $this->transform($row->fresh());
+        $mechanicToken = $row->mechanic?->fcm_token;
+        $requestId = $row->id;
+        $outcome = $validated['outcome'];
 
-        $this->firestoreSync->syncInterventionRequest($row->fresh());
+        dispatch(function () use ($mechanicToken, $requestId, $outcome, $row): void {
+            app(FcmService::class)->sendToToken(
+                $mechanicToken,
+                'Intervention clôturée',
+                'Le client a indiqué que la panne était '.($outcome === 'fixed' ? 'réglée' : 'non réglée').'.',
+                ['type' => 'request_completed', 'request_id' => (string) $requestId]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row->fresh());
+        })->afterResponse();
 
-        return response()->json($this->transform($row->fresh()));
+        return response()->json($payload);
     }
 
     /**
@@ -225,14 +229,21 @@ class InterventionRequestController extends Controller
 
         $fresh = $row->fresh(['client:id,name,phone', 'mechanic:id,name,phone', 'mechanicRating']);
 
-        $this->fcmService->sendToToken(
-            $fresh->mechanic?->fcm_token,
-            'Nouvelle note',
-            'Un client t’a attribué '.$validated['stars'].'/5 pour une intervention.',
-            ['type' => 'mechanic_rated', 'request_id' => (string) $fresh->id]
-        );
+        $payload = $this->transform($fresh);
+        $mechanicToken = $fresh->mechanic?->fcm_token;
+        $requestId = $fresh->id;
+        $stars = $validated['stars'];
 
-        return response()->json($this->transform($fresh), 201);
+        dispatch(function () use ($mechanicToken, $stars, $requestId): void {
+            app(FcmService::class)->sendToToken(
+                $mechanicToken,
+                'Nouvelle note',
+                'Un client t’a attribué '.$stars.'/5 pour une intervention.',
+                ['type' => 'mechanic_rated', 'request_id' => (string) $requestId]
+            );
+        })->afterResponse();
+
+        return response()->json($payload, 201);
     }
 
     /**
@@ -260,16 +271,21 @@ class InterventionRequestController extends Controller
         $row->save();
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
 
-        $this->fcmService->sendToToken(
-            $row->client?->fcm_token,
-            'Intervention terminée',
-            'Le mécanicien a indiqué que l’intervention est terminée. Indique si la panne est réglée.',
-            ['type' => 'mechanic_marked_complete', 'request_id' => (string) $row->id]
-        );
+        $payload = $this->transform($row->fresh());
+        $clientToken = $row->client?->fcm_token;
+        $requestId = $row->id;
 
-        $this->firestoreSync->syncInterventionRequest($row->fresh());
+        dispatch(function () use ($clientToken, $requestId, $row): void {
+            app(FcmService::class)->sendToToken(
+                $clientToken,
+                'Intervention terminée',
+                'Le mécanicien a indiqué que l’intervention est terminée. Indique si la panne est réglée.',
+                ['type' => 'mechanic_marked_complete', 'request_id' => (string) $requestId]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row->fresh());
+        })->afterResponse();
 
-        return response()->json($this->transform($row->fresh()));
+        return response()->json($payload);
     }
 
     public function accept(Request $request, int $id)
@@ -396,12 +412,6 @@ class InterventionRequestController extends Controller
 
         $data['rating'] = null;
         if ($r->relationLoaded('mechanicRating') && $r->mechanicRating) {
-            $data['rating'] = [
-                'stars' => $r->mechanicRating->stars,
-                'comment' => $r->mechanicRating->comment,
-                'created_at' => $r->mechanicRating->created_at?->toIso8601String(),
-            ];
-        } elseif ($r->mechanicRating) {
             $data['rating'] = [
                 'stars' => $r->mechanicRating->stars,
                 'comment' => $r->mechanicRating->comment,

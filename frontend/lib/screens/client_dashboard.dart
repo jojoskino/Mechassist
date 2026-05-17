@@ -16,6 +16,7 @@ import '../services/profile_signals.dart';
 import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
+import '../utils/api_perf.dart';
 import '../utils/gps_position_tracker.dart';
 import '../services/api_keep_alive.dart';
 import '../utils/list_search.dart';
@@ -243,7 +244,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     Future<void>.delayed(const Duration(seconds: 2), () async {
       if (!mounted) return;
       if (!ApiService.isServerWarm) {
-        await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
+        await ApiService.ensureBackendReady(
+          maxWait: ApiPerf.silentRetryReadyMaxWait(ApiService.serverOrigin),
+        );
       }
       if (!mounted) return;
       _refreshAll(silent: true, requireFreshGps: false, refreshProfile: false);
@@ -417,7 +420,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     try {
       if (!ApiService.isServerWarm) {
         await ApiService.ensureBackendReady(
-          maxWait: kIsWeb ? const Duration(seconds: 60) : const Duration(seconds: 25),
+          maxWait: ApiPerf.silentRetryReadyMaxWait(ApiService.serverOrigin),
         );
       }
       final reuseCoords = lat != null && lng != null && !requireFreshGps;

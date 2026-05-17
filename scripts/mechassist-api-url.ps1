@@ -1,5 +1,6 @@
 # Charge l'URL API (ngrok auto) dans $env:API_BASE_URL pour les scripts run_*.ps1.
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "start-backend.ps1")
 . (Join-Path $PSScriptRoot "resolve-ngrok-api-url.ps1")
 
 $url = Resolve-MechassistApiUrl

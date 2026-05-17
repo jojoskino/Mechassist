@@ -12,7 +12,9 @@ class HealthController
      */
     public function __invoke(): JsonResponse
     {
-        return response()->json(['status' => 'ok']);
+        return response()
+            ->json(['status' => 'ok'])
+            ->header('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
 
     /**

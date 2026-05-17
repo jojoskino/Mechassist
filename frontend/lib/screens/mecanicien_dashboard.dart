@@ -13,6 +13,7 @@ import '../services/push_sync.dart';
 import '../screens/full_screen_image_page.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
+import '../utils/api_perf.dart';
 import '../utils/gps_position_tracker.dart';
 import '../services/api_keep_alive.dart';
 import '../utils/list_search.dart';
@@ -101,7 +102,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   void _schedulePresenceTimer() {
     _presenceTimer?.cancel();
-    final interval = available ? const Duration(seconds: 45) : const Duration(minutes: 2);
+    final interval = available ? const Duration(minutes: 2) : const Duration(minutes: 4);
     _presenceTimer = Timer.periodic(interval, (_) => _touchPresence());
   }
 
@@ -196,7 +197,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     Future<void>.delayed(const Duration(seconds: 2), () async {
       if (!mounted) return;
       if (!ApiService.isServerWarm) {
-        await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 60));
+        await ApiService.ensureBackendReady(
+          maxWait: ApiPerf.silentRetryReadyMaxWait(ApiService.serverOrigin),
+        );
       }
       if (!mounted) return;
       _refresh(silent: true, refreshProfile: false);
@@ -546,7 +549,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     try {
       if (!ApiService.isServerWarm) {
         await ApiService.ensureBackendReady(
-          maxWait: kIsWeb ? const Duration(seconds: 60) : const Duration(seconds: 25),
+          maxWait: ApiPerf.silentRetryReadyMaxWait(ApiService.serverOrigin),
         );
       }
       final results = await Future.wait<dynamic>([

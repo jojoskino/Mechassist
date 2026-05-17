@@ -55,7 +55,7 @@ class _HelpScreenState extends State<HelpScreen> {
   Future<void> _testPing() async {
     setState(() => _testingPing = true);
     if (!ApiService.isServerWarm) {
-      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 90));
+      await ApiService.ensureBackendReady();
     }
     final ok = await ApiService.pingHealth(timeout: const Duration(seconds: 20));
     if (!mounted) return;

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -46,7 +47,9 @@ class AuthController extends Controller
 
         $fresh = $user->fresh();
         if ($isMechanic) {
-            $firestore->syncMechanicPresence($fresh);
+            dispatch(function () use ($firestore, $fresh): void {
+                $firestore->syncMechanicPresence($fresh);
+            })->afterResponse();
         }
 
         return response()->json(['user' => $fresh, 'token' => $token], 201);
@@ -93,14 +96,19 @@ class AuthController extends Controller
      */
     public function clientConfig()
     {
-        $webClientId = (string) config('services.google.client_id', '');
+        $data = Cache::remember('mechassist_client_config', 300, function () {
+            $webClientId = (string) config('services.google.client_id', '');
+            $mapsKey = (string) env('GOOGLE_MAPS_WEB_API_KEY', '');
 
-        $mapsKey = (string) env('GOOGLE_MAPS_WEB_API_KEY', '');
+            return [
+                'google_client_id' => $webClientId !== '' ? $webClientId : null,
+                'google_maps_web_api_key' => $mapsKey !== '' ? $mapsKey : null,
+            ];
+        });
 
-        return response()->json([
-            'google_client_id' => $webClientId !== '' ? $webClientId : null,
-            'google_maps_web_api_key' => $mapsKey !== '' ? $mapsKey : null,
-        ]);
+        return response()
+            ->json($data)
+            ->header('Cache-Control', 'public, max-age=300');
     }
 
     /**

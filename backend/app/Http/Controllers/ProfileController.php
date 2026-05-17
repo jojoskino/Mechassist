@@ -40,7 +40,12 @@ class ProfileController extends Controller
         $user->save();
 
         $fresh = $user->fresh();
-        $firestore->syncMechanicPresence($fresh);
+
+        if ($fresh->role === 'mecanicien') {
+            dispatch(function () use ($firestore, $fresh): void {
+                $firestore->syncMechanicPresence($fresh);
+            })->afterResponse();
+        }
 
         return response()->json($fresh);
     }

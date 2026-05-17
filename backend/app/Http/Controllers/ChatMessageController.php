@@ -101,20 +101,25 @@ class ChatMessageController extends Controller
             default => mb_substr((string) $message->body, 0, 120),
         };
 
-        $this->fcmService->sendToToken(
-            $target?->fcm_token,
-            $senderName,
-            $preview,
-            [
-                'type' => 'chat_message',
-                'request_id' => (string) $row->id,
-                'sender_id' => (string) $request->user()->id,
-                'sender_name' => $senderName,
-                'message_preview' => $preview,
-            ]
-        );
+        $targetToken = $target?->fcm_token;
+        $requestId = $row->id;
+        $senderId = $request->user()->id;
 
-        $this->firestoreSync->syncChatMessage($message, $request->user());
+        dispatch(function () use ($targetToken, $senderName, $preview, $requestId, $senderId, $message, $request): void {
+            app(FcmService::class)->sendToToken(
+                $targetToken,
+                $senderName,
+                $preview,
+                [
+                    'type' => 'chat_message',
+                    'request_id' => (string) $requestId,
+                    'sender_id' => (string) $senderId,
+                    'sender_name' => $senderName,
+                    'message_preview' => $preview,
+                ]
+            );
+            app(FirestoreSyncService::class)->syncChatMessage($message, $request->user());
+        })->afterResponse();
 
         return response()->json($message, 201);
     }

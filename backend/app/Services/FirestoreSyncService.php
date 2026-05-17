@@ -7,6 +7,7 @@ use App\Models\InterventionRequest;
 use App\Models\User;
 use Google\Auth\Credentials\ServiceAccountCredentials;
 use Google\Auth\HttpHandler\HttpHandlerFactory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -42,6 +43,12 @@ class FirestoreSyncService
         if (! $this->enabled()) {
             return null;
         }
+
+        $cached = Cache::get('mechassist_firestore_oauth');
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
         try {
             $json = json_decode(
                 (string) file_get_contents((string) env('GOOGLE_APPLICATION_CREDENTIALS')),
@@ -54,8 +61,12 @@ class FirestoreSyncService
                 $json
             );
             $token = $creds->fetchAuthToken(HttpHandlerFactory::build());
+            $access = $token['access_token'] ?? null;
+            if (is_string($access) && $access !== '') {
+                Cache::put('mechassist_firestore_oauth', $access, 3300);
+            }
 
-            return $token['access_token'] ?? null;
+            return $access;
         } catch (\Throwable $e) {
             Log::warning('FirestoreSync: jeton OAuth impossible.', ['message' => $e->getMessage()]);
 

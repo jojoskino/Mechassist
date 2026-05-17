@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../utils/api_perf.dart';
 import 'api_config.dart';
 import 'api_response_cache.dart';
 import 'live_sync.dart';
@@ -51,6 +52,8 @@ class ApiService {
 
   static bool get isServerWarm => _serverWarm;
 
+  static bool get _fastApi => ApiPerf.isFastApiHost(serverOrigin);
+
   /// Vérifie que le backend répond. [wait] : attendre (splash / login).
   static Future<bool> warmServer({bool wait = true}) {
     if (_serverWarm && !wait) return Future.value(true);
@@ -60,22 +63,21 @@ class ApiService {
     return f;
   }
 
-  /// Attend que le backend réponde (réseau lent ou serveur froid).
+  /// Attend que le backend réponde (court sur tunnel local / ngrok).
   static Future<bool> ensureBackendReady({
-    Duration maxWait = const Duration(seconds: 120),
+    Duration? maxWait,
   }) async {
     if (_serverWarm) return true;
-    final deadline = DateTime.now().add(maxWait);
-    var pause = const Duration(milliseconds: 350);
+    final limit = maxWait ?? ApiPerf.backendReadyMaxWait(serverOrigin);
+    final deadline = DateTime.now().add(limit);
+    var pause = _fastApi ? const Duration(milliseconds: 200) : const Duration(milliseconds: 400);
     while (DateTime.now().isBefore(deadline)) {
-      if (await pingHealth(
-        timeout: kIsWeb ? const Duration(seconds: 25) : const Duration(seconds: 12),
-      )) {
+      if (await pingHealth()) {
         return true;
       }
       await Future<void>.delayed(pause);
-      if (pause < const Duration(seconds: 4)) {
-        pause = Duration(milliseconds: pause.inMilliseconds + 350);
+      if (pause < const Duration(seconds: 2)) {
+        pause = Duration(milliseconds: pause.inMilliseconds + (_fastApi ? 150 : 300));
       }
     }
     return _serverWarm;
@@ -83,35 +85,28 @@ class ApiService {
 
   static Future<bool> _doWarm() async {
     try {
-      return await ensureBackendReady(
-        maxWait: kIsWeb ? const Duration(seconds: 90) : const Duration(seconds: 35),
-      );
+      return await ensureBackendReady();
     } finally {
       _warming = null;
     }
   }
 
-  /// Vérifie que le backend répond (`/api/health` et `/up` en parallèle).
-  static Future<bool> pingHealth({Duration timeout = const Duration(seconds: 5)}) async {
+  /// Vérifie que le backend répond (`/api/health` uniquement — léger).
+  static Future<bool> pingHealth({Duration? timeout}) async {
     final origin = serverOrigin.replaceAll(RegExp(r'/+$'), '');
-    final checks = ['/api/health', '/up'].map((path) async {
-      try {
-        final response = await _client
-            .get(
-              Uri.parse('$origin$path'),
-              headers: _publicJsonHeaders(json: false),
-            )
-            .timeout(timeout);
-        return response.statusCode == 200;
-      } catch (_) {
-        return false;
+    final t = timeout ?? ApiPerf.healthPingTimeout(origin);
+    try {
+      final response = await _client
+          .get(
+            Uri.parse('$origin/api/health'),
+            headers: _publicJsonHeaders(json: false),
+          )
+          .timeout(t);
+      if (response.statusCode == 200) {
+        _serverWarm = true;
+        return true;
       }
-    });
-    final results = await Future.wait(checks);
-    if (results.any((ok) => ok)) {
-      _serverWarm = true;
-      return true;
-    }
+    } catch (_) {}
     return false;
   }
 
@@ -239,23 +234,29 @@ class ApiService {
     }
   }
 
-  static Duration get _httpTimeoutWarm =>
-      kIsWeb ? const Duration(seconds: 20) : const Duration(seconds: 12);
+  static Duration get _httpTimeoutWarm => _fastApi
+      ? (kIsWeb ? const Duration(seconds: 12) : const Duration(seconds: 8))
+      : (kIsWeb ? const Duration(seconds: 20) : const Duration(seconds: 12));
 
-  static Duration get _httpTimeoutCold =>
-      kIsWeb ? const Duration(seconds: 90) : const Duration(seconds: 28);
-  static const Duration _uploadTimeoutWarm = Duration(seconds: 45);
-  static const Duration _uploadTimeoutCold = Duration(seconds: 60);
+  static Duration get _httpTimeoutCold => _fastApi
+      ? (kIsWeb ? const Duration(seconds: 18) : const Duration(seconds: 14))
+      : (kIsWeb ? const Duration(seconds: 45) : const Duration(seconds: 28));
+
+  static Duration get _uploadTimeoutWarm =>
+      _fastApi ? const Duration(seconds: 30) : const Duration(seconds: 45);
+
+  static Duration get _uploadTimeoutCold =>
+      _fastApi ? const Duration(seconds: 40) : const Duration(seconds: 60);
 
   static const _transientBody = '{"message":"","transient":true}';
 
   static Future<http.Response> _tw(Future<http.Response> Function() request) async {
     if (!_serverWarm) {
       await ensureBackendReady(
-        maxWait: kIsWeb ? const Duration(seconds: 45) : const Duration(seconds: 20),
+        maxWait: _fastApi ? const Duration(seconds: 2) : const Duration(seconds: 12),
       );
     }
-    final attempts = _serverWarm ? 2 : (kIsWeb ? 5 : 4);
+    final attempts = _serverWarm ? 1 : (_fastApi ? 2 : (kIsWeb ? 4 : 3));
     final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
     for (var attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) {
@@ -282,7 +283,7 @@ class ApiService {
       code == 408 || code == 502 || code == 503 || code == 504;
 
   static Future<http.Response> _twMultipart(http.BaseRequest request) async {
-    final attempts = _serverWarm ? 2 : 3;
+    final attempts = _serverWarm ? 1 : (_fastApi ? 2 : 3);
     final timeout = _serverWarm ? _uploadTimeoutWarm : _uploadTimeoutCold;
     for (var attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) {

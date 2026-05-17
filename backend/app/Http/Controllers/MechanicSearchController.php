@@ -43,6 +43,7 @@ class MechanicSearchController extends Controller
             ->whereNotNull('longitude')
             ->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
             ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta])
+            ->limit(80)
             ->get(['id', 'name', 'phone', 'mechanic_specialty', 'latitude', 'longitude', 'is_available', 'last_location_at', 'last_seen_at', 'avatar_path', 'role']);
 
         $withDistance = $mechanics->map(function (User $u) use ($lat, $lng, $onlineBefore) {

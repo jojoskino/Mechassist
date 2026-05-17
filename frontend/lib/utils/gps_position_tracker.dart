@@ -78,10 +78,10 @@ class GpsPositionTracker {
 }
 
 /// PERF: Intervalle minimum de polling dashboard (foreground).
-const Duration perfDashboardPollInterval = Duration(seconds: 30);
+const Duration perfDashboardPollInterval = Duration(seconds: 45);
 
 /// PERF: Intervalle chat (écran visible).
-const Duration perfChatPollInterval = Duration(seconds: 12);
+const Duration perfChatPollInterval = Duration(seconds: 15);
 
 /// PERF: Splash — attente max non bloquante du backend.
-const Duration perfSplashBackendMaxWait = Duration(seconds: 8);
+const Duration perfSplashBackendMaxWait = Duration(seconds: 3);
