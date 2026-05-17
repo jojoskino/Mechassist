@@ -1,46 +1,45 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'api_service.dart';
 
-/// Garde Render éveillé (plan gratuit ~15 min d’inactivité).
+/// PERF: Plus de ping périodique Render — réveil uniquement au besoin (splash, login, reprise app).
 class ApiKeepAlive with WidgetsBindingObserver {
   ApiKeepAlive._();
   static final ApiKeepAlive instance = ApiKeepAlive._();
 
-  Timer? _timer;
-  bool _foreground = true;
+  bool _attached = false;
 
+  /// PERF: Enregistre l’observateur cycle de vie sans timer automatique.
   void start() {
+    if (_attached) return;
+    _attached = true;
     WidgetsBinding.instance.addObserver(this);
-    _schedule();
-    unawaited(ApiService.warmServer(wait: false));
   }
 
-  void _schedule() {
-    _timer?.cancel();
-    if (!_foreground) return;
-    final interval = kIsWeb ? const Duration(seconds: 90) : const Duration(minutes: 2);
-    _timer = Timer.periodic(interval, (_) {
-      unawaited(ApiService.warmServer(wait: false));
-    });
+  /// PERF: Splash / login — warm non bloquant.
+  void warmOnAuthEntry() {
+    if (!ApiService.isServerWarm) {
+      ApiService.warmServer(wait: false);
+    }
+  }
+
+  /// PERF: Reprise app si le backend est froid.
+  void warmIfCold() {
+    if (!ApiService.isServerWarm) {
+      ApiService.warmServer(wait: false);
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (_foreground) {
-      unawaited(ApiService.warmServer(wait: false));
-      _schedule();
-    } else {
-      _timer?.cancel();
+    if (state == AppLifecycleState.resumed) {
+      warmIfCold();
     }
   }
 
   void dispose() {
+    if (!_attached) return;
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
+    _attached = false;
   }
 }
