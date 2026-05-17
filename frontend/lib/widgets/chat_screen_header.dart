@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../screens/user_profile_page.dart';
 import '../theme/feu_theme.dart';
@@ -60,7 +60,7 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
             if (onRefresh != null)
               ListTile(
                 leading: const Icon(Icons.refresh_rounded, color: FeuTheme.deepBlue),
-                title: Text('Actualiser', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                title: Text('Actualiser', style: AppFonts.style(fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(ctx);
                   onRefresh!();
@@ -68,7 +68,7 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
               ),
             ListTile(
               leading: const Icon(Icons.person_outline_rounded, color: FeuTheme.deepBlue),
-              title: Text('Voir le profil', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              title: Text('Voir le profil', style: AppFonts.style(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 if (onOpenProfile != null) {
@@ -147,7 +147,7 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
                         peerName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
+                        style: AppFonts.style(
                           color: FeuTheme.charcoal,
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -156,7 +156,7 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
                       if (_isOnline)
                         Text(
                           'En ligne',
-                          style: GoogleFonts.poppins(
+                          style: AppFonts.style(
                             color: FeuTheme.urgencyLightFg,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -167,14 +167,14 @@ class ChatScreenHeader extends StatelessWidget implements PreferredSizeWidget {
                           specialty!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12.5),
+                          style: AppFonts.style(color: Colors.grey.shade600, fontSize: 12.5),
                         )
                       else if (phone != null && phone!.trim().isNotEmpty)
                         Text(
                           phone!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12.5),
+                          style: AppFonts.style(color: Colors.grey.shade600, fontSize: 12.5),
                         ),
                     ],
                   ),

@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../theme/feu_theme.dart';
@@ -150,7 +150,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
     super.dispose();
   }
 
-  TextStyle get _sectionLabel => GoogleFonts.poppins(
+  TextStyle get _sectionLabel => AppFonts.style(
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.6,
@@ -172,7 +172,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
     final desc = _descCtrl.text.trim();
     if (desc.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Décris la panne pour envoyer la demande.', style: GoogleFonts.poppins())),
+        SnackBar(content: Text('Décris la panne pour envoyer la demande.', style: AppFonts.style())),
       );
       return;
     }
@@ -203,7 +203,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
       if (showTopBar) _topBar(context),
       Text(
         'Signalement de panne',
-        style: GoogleFonts.poppins(
+        style: AppFonts.style(
           fontSize: 24,
           fontWeight: FontWeight.w800,
           color: FeuTheme.charcoal,
@@ -213,7 +213,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
       const SizedBox(height: 8),
       Text(
         'Décrivez votre problème pour recevoir l\'aide d\'un expert certifié.',
-        style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade700, height: 1.4),
+        style: AppFonts.style(fontSize: 14, color: Colors.grey.shade700, height: 1.4),
       ),
       if (widget.mechanicName.isNotEmpty) ...[
         const SizedBox(height: 12),
@@ -243,7 +243,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             runSpacing: 8,
             children: widget.recentAddresses.map((a) {
               return ActionChip(
-                label: Text(a, style: GoogleFonts.poppins(fontSize: 12)),
+                label: Text(a, style: AppFonts.style(fontSize: 12)),
                 onPressed: () {
                   _addressCtrl.text = a;
                   setState(() {});
@@ -265,7 +265,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
           minimumSize: const Size(double.infinity, 52),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
-        child: Text('Envoyer la demande', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16)),
+        child: Text('Envoyer la demande', style: AppFonts.style(fontWeight: FontWeight.w600, fontSize: 16)),
       ),
       SizedBox(height: MediaQuery.paddingOf(context).bottom + 8),
     ];
@@ -342,7 +342,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
           const SizedBox(width: 8),
           Text(
             'MechAssist',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 18, color: FeuTheme.deepBlue),
+            style: AppFonts.style(fontWeight: FontWeight.w800, fontSize: 18, color: FeuTheme.deepBlue),
           ),
         ],
       ),
@@ -364,7 +364,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
           Expanded(
             child: Text(
               'Pour ${widget.mechanicName}',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 13, color: FeuTheme.deepBlue),
+              style: AppFonts.style(fontWeight: FontWeight.w600, fontSize: 13, color: FeuTheme.deepBlue),
             ),
           ),
         ],
@@ -413,7 +413,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             const SizedBox(height: 8),
             Text(
               label,
-              style: GoogleFonts.poppins(
+              style: AppFonts.style(
                 fontWeight: FontWeight.w700,
                 fontSize: 15,
                 color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal,
@@ -457,7 +457,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             Text(
               label,
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 11.5, fontWeight: FontWeight.w700, color: fg),
+              style: AppFonts.style(fontSize: 11.5, fontWeight: FontWeight.w700, color: fg),
             ),
           ],
         ),
@@ -480,10 +480,10 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             maxLines: 5,
             maxLength: _maxDesc,
             buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
-            style: GoogleFonts.poppins(fontSize: 15),
+            style: AppFonts.style(fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Ex: Ma voiture ne démarre plus, il y a un bruit métallique…',
-              hintStyle: GoogleFonts.poppins(color: Colors.grey.shade500, fontSize: 14),
+              hintStyle: AppFonts.style(color: Colors.grey.shade500, fontSize: 14),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
             ),
@@ -494,7 +494,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
               alignment: Alignment.centerRight,
               child: Text(
                 '$len/$_maxDesc',
-                style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade500),
+                style: AppFonts.style(fontSize: 12, color: Colors.grey.shade500),
               ),
             ),
           ),
@@ -509,7 +509,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
         Expanded(
           child: Text(
             _pickupLabel ?? 'Ma position',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+            style: AppFonts.style(fontWeight: FontWeight.w600, fontSize: 14),
           ),
         ),
         if (_refreshingLocation)
@@ -537,7 +537,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             children: [
               Icon(Icons.add_a_photo_outlined, color: FeuTheme.deepBlue.withValues(alpha: 0.7)),
               const SizedBox(height: 4),
-              Text('Ajouter', style: GoogleFonts.poppins(fontSize: 12, color: FeuTheme.deepBlue)),
+              Text('Ajouter', style: AppFonts.style(fontSize: 12, color: FeuTheme.deepBlue)),
             ],
           ),
           onTap: () => _showPhotoSource(),
@@ -598,7 +598,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: Text('Galerie', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              title: Text('Galerie', style: AppFonts.style(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickPhoto(ImageSource.gallery);
@@ -607,7 +607,7 @@ class _CreateRequestSheetState extends State<CreateRequestSheet> {
             if (!kIsWeb)
               ListTile(
                 leading: const Icon(Icons.photo_camera_outlined),
-                title: Text('Appareil photo', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                title: Text('Appareil photo', style: AppFonts.style(fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _pickPhoto(ImageSource.camera);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +7,10 @@ import 'package:flutter/material.dart';
 import 'app_navigator.dart';
 import 'fcm_background.dart';
 import 'services/api_config.dart';
+import 'services/api_service.dart';
+import 'services/api_data_cache.dart';
+import 'services/api_keep_alive.dart';
+import 'services/client_config_cache.dart';
 import 'services/firebase_bootstrap.dart';
 import 'services/notification_navigation.dart';
 import 'screens/splash_screen.dart';
@@ -19,6 +25,7 @@ import 'screens/intervention_chat_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/app_fonts.dart';
 import 'theme/app_theme.dart';
+import 'widgets/responsive_web_frame.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,9 +34,13 @@ void main() async {
   }
   await AppFonts.ensureLoaded();
   await ApiConfig.load();
-  await ApiConfig.ensureMobileProductionDefault();
-  await FirebaseBootstrap.init();
+  await ApiConfig.ensureProductionDefault();
+  await ApiDataCache.preload();
+  ApiKeepAlive.instance.start();
+  unawaited(ApiService.warmServer(wait: false));
+  unawaited(ClientConfigCache.get());
   runApp(const MechAssistApp());
+  unawaited(FirebaseBootstrap.init());
 }
 
 class MechAssistApp extends StatefulWidget {
@@ -62,12 +73,13 @@ class _MechAssistAppState extends State<MechAssistApp> {
       title: 'MechAssist',
       theme: AppTheme.light(),
       builder: (context, child) {
-        return MediaQuery(
+        final scaled = MediaQuery(
           data: MediaQuery.of(context).copyWith(
             textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.15),
           ),
           child: child ?? const SizedBox.shrink(),
         );
+        return ResponsiveWebFrame(child: scaled);
       },
       initialRoute: '/',
       routes: {

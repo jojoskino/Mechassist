@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/api_data_cache.dart';
+import '../services/api_response_cache.dart';
+import '../services/client_config_cache.dart';
+import '../services/refresh_coordinator.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/push_sync.dart';
 import '../screens/full_screen_image_page.dart';
@@ -59,16 +63,18 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   bool _locationReady = false;
   String? _googleMapsWebKey;
   final TextEditingController _requestSearchCtrl = TextEditingController();
+  final _refreshCoordinator = RefreshCoordinator();
 
   @override
   void initState() {
     super.initState();
     AppNotificationHub.instance.addListener(_onNotificationsChanged);
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
-    _loadPublicConfig();
-    _refresh();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh(silent: true));
-    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _touchPresence());
+    _applyMemoryCacheInstant();
+    unawaited(_loadPublicConfig());
+    unawaited(_refresh());
+    _refreshTimer = Timer.periodic(const Duration(seconds: 40), (_) => _refresh(silent: true));
+    _presenceTimer = Timer.periodic(const Duration(seconds: 90), (_) => _touchPresence());
     _syncPush();
     _bootstrapLocation();
   }
@@ -87,14 +93,30 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     return permission != LocationPermission.denied && permission != LocationPermission.deniedForever;
   }
 
-  Future<void> _loadPublicConfig() async {
-    final c = await ApiService.getClientConfig();
-    if (!mounted) return;
-    final raw = c['google_maps_web_api_key'];
-    final s = raw?.toString().trim();
-    setState(() {
-      _googleMapsWebKey = (s != null && s.isNotEmpty && s != 'null') ? s : null;
+  void _applyMemoryCacheInstant() {
+    final cached = ApiDataCache.requestsSync(mechanic: true);
+    if (cached == null || cached.isEmpty) return;
+    requests = cached;
+    loading = false;
+    lastError = null;
+  }
+
+  void _scheduleSilentRetry() {
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      _refresh(silent: true);
     });
+  }
+
+  String? _messageIfRealError(Map<String, dynamic> res, String fallback) {
+    if (ApiService.isTransientFailure(res)) return null;
+    return res['message']?.toString() ?? fallback;
+  }
+
+  Future<void> _loadPublicConfig() async {
+    await ClientConfigCache.get();
+    if (!mounted) return;
+    setState(() => _googleMapsWebKey = ClientConfigCache.googleMapsWebKey());
   }
 
   void _applyCoords(double latitude, double longitude) {
@@ -168,13 +190,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
   Future<void> _pushLocation(double lat, double lng, {bool force = false}) async {
     final now = DateTime.now();
     final last = _lastLocationPost;
-    if (!force && last != null && now.difference(last) < const Duration(seconds: 10)) {
+    if (!force && last != null && now.difference(last) < const Duration(seconds: 30)) {
       return;
     }
     final token = await AuthStorage.getToken();
     if (token == null) return;
     _lastLocationPost = now;
-    await ApiService.updateLocation(token, lat, lng);
+    ApiService.postLocation(token, lat, lng);
   }
 
   Future<void> _touchPresence() async {
@@ -335,11 +357,17 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     }
     await GoogleSignInService.signOut();
     await AuthStorage.clear();
+    await ApiDataCache.clear();
+    ApiResponseCache.clear();
     if (!context.mounted) return;
     Navigator.pushReplacementNamed(context, '/login');
   }
 
-  Future<void> _refresh({bool silent = false}) async {
+  Future<void> _refresh({bool silent = false, bool refreshProfile = true}) async {
+    await _refreshCoordinator.run(() => _refreshBody(silent: silent, refreshProfile: refreshProfile));
+  }
+
+  Future<void> _refreshBody({bool silent = false, bool refreshProfile = true}) async {
     if (!silent) {
       setState(() => loading = true);
     }
@@ -356,14 +384,14 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
     String? errorMsg;
     try {
       final results = await Future.wait<dynamic>([
-        ApiService.getMe(token),
+        refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
         ApiService.listRequests(token, status: _requestStatusFilter),
       ]);
       final me = results[0] as Map<String, dynamic>;
       final reqs = results[1] as Map<String, dynamic>;
 
       final ms = me['status'] as int?;
-      if (ms != null && ms >= 200 && ms < 300) {
+      if (refreshProfile && ms != null && ms >= 200 && ms < 300) {
         final rawAvail = me['is_available'];
         available = rawAvail is bool
             ? rawAvail
@@ -379,20 +407,24 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> {
           lng = mlng;
           _locationReady = true;
         }
-        Future<void>.microtask(() => _touchPresence());
+      } else if (!ApiService.isTransientFailure(me)) {
+        errorMsg = _messageIfRealError(me, 'Session invalide (${me['status']}).');
       } else {
-        errorMsg = me['message']?.toString() ?? 'Session invalide ou API injoignable (${me['status']}).';
+        _scheduleSilentRetry();
       }
 
       final rs = reqs['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqs['data'] is List) {
         requests = reqs['data'] as List;
-      } else {
+        unawaited(ApiDataCache.saveRequests(requests, mechanic: true));
+      } else if (!ApiService.isTransientFailure(reqs)) {
         requests = [];
-        errorMsg ??= reqs['message']?.toString() ?? 'Impossible de charger les demandes (${reqs['status']}).';
+        errorMsg ??= _messageIfRealError(reqs, 'Impossible de charger les demandes (${reqs['status']}).');
+      } else {
+        _scheduleSilentRetry();
       }
     } catch (_) {
-      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion.';
+      if (requests.isEmpty) _scheduleSilentRetry();
     }
 
     if (!mounted) return;

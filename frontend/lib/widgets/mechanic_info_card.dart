@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../screens/user_profile_page.dart';
 import '../theme/feu_theme.dart';
@@ -102,11 +102,11 @@ class MechanicInfoCard extends StatelessWidget {
                   children: [
                     Text(
                       'Ton mécanicien',
-                      style: GoogleFonts.poppins(fontSize: 11.5, color: Colors.grey.shade600),
+                      style: AppFonts.style(fontSize: 11.5, color: Colors.grey.shade600),
                     ),
                     Text(
                       name,
-                      style: GoogleFonts.poppins(
+                      style: AppFonts.style(
                         fontSize: compact ? 16 : 17,
                         fontWeight: FontWeight.w700,
                         color: FeuTheme.charcoal,
@@ -115,12 +115,12 @@ class MechanicInfoCard extends StatelessWidget {
                     if (specialty != null && specialty!.trim().isNotEmpty)
                       Text(
                         specialty!,
-                        style: GoogleFonts.poppins(fontSize: 13, color: FeuTheme.deepBlue),
+                        style: AppFonts.style(fontSize: 13, color: FeuTheme.deepBlue),
                       ),
                     if (phone != null && phone!.trim().isNotEmpty)
                       Text(
                         phone!,
-                        style: GoogleFonts.poppins(fontSize: 12.5, color: Colors.grey.shade700),
+                        style: AppFonts.style(fontSize: 12.5, color: Colors.grey.shade700),
                       ),
                   ],
                 ),

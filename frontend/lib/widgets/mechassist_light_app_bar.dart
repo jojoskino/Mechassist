@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 import 'mechassist_logo.dart';
@@ -57,7 +57,7 @@ class MechAssistLightAppBar extends StatelessWidget implements PreferredSizeWidg
           ],
           Text(
             'MechAssist',
-            style: GoogleFonts.poppins(
+            style: AppFonts.style(
               fontWeight: FontWeight.w800,
               fontSize: 20,
               color: FeuTheme.deepBlue,

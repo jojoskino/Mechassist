@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -29,7 +29,7 @@ class ClientHomeHelpPanel extends StatelessWidget {
             Expanded(
               child: Text(
                 'Besoin d\'aide ?',
-                style: GoogleFonts.poppins(
+                style: AppFonts.style(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
                   color: FeuTheme.charcoal,
@@ -46,7 +46,7 @@ class ClientHomeHelpPanel extends StatelessWidget {
                 mechanicsNearby > 0
                     ? '$mechanicsNearby Mécano${mechanicsNearby > 1 ? 's' : ''} à proximité'
                     : 'Recherche en cours…',
-                style: GoogleFonts.poppins(
+                style: AppFonts.style(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
                   color: FeuTheme.urgencyLightFg,
@@ -61,7 +61,7 @@ class ClientHomeHelpPanel extends StatelessWidget {
           icon: const Icon(Icons.warning_amber_rounded, color: FeuTheme.charcoal),
           label: Text(
             'Signaler une panne',
-            style: GoogleFonts.poppins(
+            style: AppFonts.style(
               fontWeight: FontWeight.w700,
               fontSize: 16,
               color: FeuTheme.charcoal,
@@ -130,7 +130,7 @@ class _QuickChip extends StatelessWidget {
               Text(
                 label,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
+                style: AppFonts.style(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: FeuTheme.charcoal,

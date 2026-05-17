@@ -17,8 +17,18 @@ class GpsHelper {
         permission == LocationPermission.always;
   }
 
+  /// Dernière position connue (quasi instantané).
+  static Future<Position?> lastKnown() async {
+    if (!await ensurePermission()) return null;
+    try {
+      return await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<Position?> bestPosition({
-    Duration timeout = const Duration(seconds: 18),
+    Duration timeout = const Duration(seconds: 5),
   }) async {
     if (!await ensurePermission()) {
       return null;

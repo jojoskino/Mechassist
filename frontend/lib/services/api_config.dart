@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// URL de base Laravel **sans** le suffixe `/api` (ex. `http://192.168.1.10:8000`).
@@ -28,9 +27,8 @@ class ApiConfig {
     _override = normalized;
   }
 
-  /// Premier lancement mobile : pointe vers l’API Render (évite 10.0.2.2 sur téléphone réel).
-  static Future<void> ensureMobileProductionDefault() async {
-    if (kIsWeb) return;
+  /// Premier lancement : pointe vers l’API Render (Web + mobile ; évite localhost / 10.0.2.2).
+  static Future<void> ensureProductionDefault() async {
     await load();
     if (_override != null && _override!.isNotEmpty) return;
     final prefs = await SharedPreferences.getInstance();

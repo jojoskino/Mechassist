@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -70,16 +72,11 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => isLoading = true);
-    final reachable = await ApiService.pingHealth();
-    if (!reachable && mounted) {
-      setState(() => isLoading = false);
-      _showSnack(
-        'Serveur injoignable (${ApiService.serverOrigin}). Vérifiez Internet ou l’URL dans Aide.',
-        isError: true,
-      );
-      return;
+    unawaited(ApiService.warmServer(wait: false));
+    var res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
+    if (ApiService.isTransientFailure(res)) {
+      res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     }
-    final res = await ApiService.login(emailCtrl.text.trim(), passwordCtrl.text, null);
     if (!mounted) return;
     setState(() => isLoading = false);
 
@@ -95,6 +92,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       _navigateByRole(user['role']?.toString() ?? 'client');
       await PushSync.syncToken();
+    } else if (ApiService.isTransientFailure(res)) {
+      _showSnack('Connexion en cours, réessaie dans un instant.', isError: true);
     } else {
       _showSnack(res['message']?.toString() ?? 'Identifiants incorrects', isError: true);
     }

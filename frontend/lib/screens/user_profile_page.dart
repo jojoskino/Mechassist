@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 import '../utils/online_status.dart';
@@ -39,7 +39,7 @@ class UserProfilePage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: FeuTheme.deepBlue,
         foregroundColor: Colors.white,
-        title: Text('Profil', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        title: Text('Profil', style: AppFonts.style(fontWeight: FontWeight.w700)),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 28, 20, 32),
@@ -70,14 +70,14 @@ class UserProfilePage extends StatelessWidget {
           Text(
             _name,
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.w800, color: FeuTheme.charcoal),
+            style: AppFonts.style(fontSize: 24, fontWeight: FontWeight.w800, color: FeuTheme.charcoal),
           ),
           if (_phone != null && _phone!.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
               _phone!,
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey.shade700),
+              style: AppFonts.style(fontSize: 16, color: Colors.grey.shade700),
             ),
           ],
           if (subtitle != null && subtitle!.isNotEmpty) ...[
@@ -85,7 +85,7 @@ class UserProfilePage extends StatelessWidget {
             Text(
               subtitle!,
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 14, color: FeuTheme.deepBlue),
+              style: AppFonts.style(fontSize: 14, color: FeuTheme.deepBlue),
             ),
           ],
           if (_isMechanic && _specialty != null && _specialty!.trim().isNotEmpty) ...[
@@ -93,7 +93,7 @@ class UserProfilePage extends StatelessWidget {
             Text(
               _specialty!,
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: FeuTheme.ember),
+              style: AppFonts.style(fontSize: 15, fontWeight: FontWeight.w600, color: FeuTheme.ember),
             ),
           ],
           if (_isMechanic) ...[
@@ -101,7 +101,7 @@ class UserProfilePage extends StatelessWidget {
             Text(
               _online ? 'En ligne' : 'Hors ligne',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
+              style: AppFonts.style(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: _online ? Colors.green.shade700 : Colors.grey.shade600,
@@ -113,7 +113,7 @@ class UserProfilePage extends StatelessWidget {
             Text(
               'Note moyenne : $rating ★ (${ratingCount ?? 0} avis)',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700),
+              style: AppFonts.style(fontSize: 13, color: Colors.grey.shade700),
             ),
           ],
           const SizedBox(height: 28),
@@ -191,7 +191,7 @@ class _ActionTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 label,
-                style: GoogleFonts.poppins(
+                style: AppFonts.style(
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
                   color: onTap == null ? Colors.grey : FeuTheme.charcoal,

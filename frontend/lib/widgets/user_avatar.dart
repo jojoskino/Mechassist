@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../services/api_service.dart';
 import '../theme/feu_theme.dart';
@@ -55,7 +55,7 @@ class UserAvatar extends StatelessWidget {
           ? null
           : Text(
               initial,
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: radius * 0.85),
+              style: AppFonts.style(fontWeight: FontWeight.w800, fontSize: radius * 0.85),
             ),
     );
 

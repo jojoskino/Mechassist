@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 import '../widgets/request_list_tile.dart';
@@ -106,7 +106,7 @@ class HistoryScreen extends StatelessWidget {
                 Text(
                   'Aucun historique',
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700),
+                  style: AppFonts.style(fontSize: 17, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
                 Padding(
@@ -114,7 +114,7 @@ class HistoryScreen extends StatelessWidget {
                   child: Text(
                     'Les interventions terminées ou clôturées apparaîtront ici.',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(color: Colors.grey.shade700, fontSize: 14),
+                    style: AppFonts.style(color: Colors.grey.shade700, fontSize: 14),
                   ),
                 ),
               ],

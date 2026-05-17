@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../services/api_service.dart';
 import '../theme/feu_theme.dart';
@@ -79,7 +79,7 @@ class ChatMessageBubble extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                     'Image indisponible',
-                    style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700),
+                    style: AppFonts.style(fontSize: 13, color: Colors.grey.shade700),
                   ),
                 ),
               if (body.isNotEmpty)

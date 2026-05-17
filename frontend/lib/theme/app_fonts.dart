@@ -1,8 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-/// Polices Poppins : fichiers locaux (mobile) + préchargement Web.
+/// Polices Poppins embarquées (assets) — identiques sur mobile et navigateur.
 abstract final class AppFonts {
   static const family = 'Poppins';
   static bool _ready = false;
@@ -11,15 +9,6 @@ abstract final class AppFonts {
 
   static Future<void> ensureLoaded() async {
     if (_ready) return;
-    if (kIsWeb) {
-      await GoogleFonts.pendingFonts([
-        GoogleFonts.poppins(fontWeight: FontWeight.w400),
-        GoogleFonts.poppins(fontWeight: FontWeight.w500),
-        GoogleFonts.poppins(fontWeight: FontWeight.w600),
-        GoogleFonts.poppins(fontWeight: FontWeight.w700),
-        GoogleFonts.poppins(fontWeight: FontWeight.w800),
-      ]);
-    }
     _ready = true;
   }
 

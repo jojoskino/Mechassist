@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -48,7 +48,7 @@ class RequestListTile extends StatelessWidget {
                     foregroundColor: FeuTheme.deepBlue,
                     child: Text(
                       initial,
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 20),
+                      style: AppFonts.style(fontWeight: FontWeight.w700, fontSize: 20),
                     ),
                   ),
                   Positioned(
@@ -78,7 +78,7 @@ class RequestListTile extends StatelessWidget {
                             mechanicName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
+                            style: AppFonts.style(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               color: FeuTheme.charcoal,
@@ -88,7 +88,7 @@ class RequestListTile extends StatelessWidget {
                         if (timeLabel != null && timeLabel!.isNotEmpty)
                           Text(
                             timeLabel!,
-                            style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                            style: AppFonts.style(fontSize: 12, color: Colors.grey.shade600),
                           ),
                       ],
                     ),
@@ -97,14 +97,14 @@ class RequestListTile extends StatelessWidget {
                       '$vehicleType · $preview',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade700),
+                      style: AppFonts.style(fontSize: 14, color: Colors.grey.shade700),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       statusLine,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
+                      style: AppFonts.style(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
                         color: statusColor,

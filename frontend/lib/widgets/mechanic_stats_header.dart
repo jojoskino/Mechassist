@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -36,12 +36,12 @@ class MechanicStatsHeader extends StatelessWidget {
                   children: [
                     Text(
                       'Statut actuel',
-                      style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
+                      style: AppFonts.style(fontSize: 13, color: Colors.grey.shade600),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       isOnline ? 'En ligne' : 'Hors ligne',
-                      style: GoogleFonts.poppins(
+                      style: AppFonts.style(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: isOnline ? FeuTheme.urgencyLightFg : Colors.grey.shade700,
@@ -84,7 +84,7 @@ class MechanicStatsHeader extends StatelessWidget {
           children: [
             Text(
               'Demandes entrantes',
-              style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w800, color: FeuTheme.charcoal),
+              style: AppFonts.style(fontSize: 17, fontWeight: FontWeight.w800, color: FeuTheme.charcoal),
             ),
             const Spacer(),
             if (pendingCount > 0)
@@ -96,7 +96,7 @@ class MechanicStatsHeader extends StatelessWidget {
                 ),
                 child: Text(
                   '$pendingCount nouvelle${pendingCount > 1 ? 's' : ''}',
-                  style: GoogleFonts.poppins(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
+                  style: AppFonts.style(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
                 ),
               ),
           ],
@@ -143,7 +143,7 @@ class _StatusToggle extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: GoogleFonts.poppins(
+          style: AppFonts.style(
             fontSize: 12.5,
             fontWeight: FontWeight.w700,
             color: selected && label == 'En ligne' ? Colors.white : fg,
@@ -193,13 +193,13 @@ class _StatCard extends StatelessWidget {
         children: [
           Icon(icon, color: fg.withValues(alpha: 0.85), size: 22),
           const SizedBox(height: 8),
-          Text(title, style: GoogleFonts.poppins(fontSize: 11.5, fontWeight: FontWeight.w600, color: subFg)),
+          Text(title, style: AppFonts.style(fontSize: 11.5, fontWeight: FontWeight.w600, color: subFg)),
           const SizedBox(height: 4),
           Text(
             value,
-            style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800, color: fg),
+            style: AppFonts.style(fontSize: 20, fontWeight: FontWeight.w800, color: fg),
           ),
-          Text(subtitle, style: GoogleFonts.poppins(fontSize: 11, color: subFg)),
+          Text(subtitle, style: AppFonts.style(fontSize: 11, color: subFg)),
         ],
       ),
     );

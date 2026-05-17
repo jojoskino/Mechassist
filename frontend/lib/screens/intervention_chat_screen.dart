@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
+import '../services/api_data_cache.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/profile_signals.dart';
@@ -40,7 +41,6 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   final ImagePicker _picker = ImagePicker();
 
   Timer? _poll;
-  Timer? _peerPoll;
   StreamSubscription<void>? _playerCompleteSub;
 
   List<dynamic> _messages = [];
@@ -80,7 +80,6 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
     WidgetsBinding.instance.removeObserver(this);
     ProfileSignals.instance.removeListener(_onProfileSignals);
     _poll?.cancel();
-    _peerPoll?.cancel();
     _playerCompleteSub?.cancel();
     unawaited(_player.dispose());
     unawaited(_recorder.dispose());
@@ -100,7 +99,6 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         state == AppLifecycleState.detached) {
       _foreground = false;
       _poll?.cancel();
-      _peerPoll?.cancel();
       if (_recording) {
         unawaited(_cancelRecording());
       }
@@ -109,31 +107,14 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
 
   void _startFastPoll() {
     _poll?.cancel();
-    _peerPoll?.cancel();
     if (!_foreground) return;
-    _poll = Timer.periodic(const Duration(milliseconds: 750), (_) => _load(silent: true));
-    _peerPoll = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!_foreground || !mounted) return;
-      unawaited(_refreshPeerSnapshot());
-    });
+    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _load(silent: true));
   }
 
   void _onProfileSignals() {
     if (_authToken == null) return;
     if (mounted) setState(() {});
     unawaited(_bootstrapAccess());
-  }
-
-  Future<void> _refreshPeerSnapshot() async {
-    final token = _authToken;
-    if (token == null) return;
-    final res = await ApiService.getInterventionRequest(token, widget.requestId);
-    if (!mounted) return;
-    final code = res['http_status'] as int?;
-    if (code == null || code < 200 || code >= 300) return;
-    _applyPeerFromRequest(res);
-    _syncPeerAvatarEpochFromPeers();
-    setState(() {});
   }
 
   void _syncPeerAvatarEpochFromPeers() {
@@ -146,6 +127,15 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
   }
 
   Future<void> _bootstrap() async {
+    final cachedMsgs = ApiDataCache.messagesSync(widget.requestId) ??
+        await ApiDataCache.loadMessages(widget.requestId);
+    if (cachedMsgs != null && cachedMsgs.isNotEmpty && mounted) {
+      setState(() {
+        _messages = cachedMsgs;
+        _loading = false;
+      });
+    }
+
     final t = await AuthStorage.getToken();
     if (!mounted) return;
     if (t == null) {
@@ -156,28 +146,33 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       return;
     }
     _authToken = t;
-    await Future.wait<void>([
-      _loadCurrentIdentity(),
-      _loadMyUserId(t),
-    ]);
-    await _bootstrapAccess();
-    if (!mounted) return;
-    _startFastPoll();
-  }
 
-  Future<void> _loadMyUserId(String token) async {
-    final me = await ApiService.getMe(token);
+    final batch = await Future.wait<dynamic>([
+      AuthStorage.getName(),
+      ApiService.getMe(t),
+      ApiService.getInterventionRequest(t, widget.requestId),
+    ]);
     if (!mounted) return;
+    _myName = ((batch[0] as String?) ?? '').trim().toLowerCase();
+    final me = batch[1] as Map<String, dynamic>;
     final st = me['status'] as int?;
     if (st != null && st >= 200 && st < 300) {
       _myUserId = ApiService.parseIntId(me['id']);
     }
+    await _bootstrapAccessWithPayload(batch[2] as Map<String, dynamic>);
+    if (!mounted) return;
+    _startFastPoll();
   }
 
   Future<void> _bootstrapAccess() async {
     final token = _authToken;
     if (token == null) return;
     final res = await ApiService.getInterventionRequest(token, widget.requestId);
+    if (!mounted) return;
+    await _bootstrapAccessWithPayload(res);
+  }
+
+  Future<void> _bootstrapAccessWithPayload(Map<String, dynamic> res) async {
     if (!mounted) return;
     final code = res['http_status'] as int?;
     final httpOk = code != null && code >= 200 && code < 300;
@@ -186,7 +181,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         _readOnly = true;
         _accessHint = res['message']?.toString() ?? 'Impossible de charger la demande.';
       });
-      await _load(silent: true);
+      await _load(silent: true, markRead: _messages.isEmpty);
       return;
     }
     _applyPeerFromRequest(res);
@@ -213,13 +208,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         }
       });
     }
-    await _load(silent: true);
-  }
-
-  Future<void> _loadCurrentIdentity() async {
-    final n = await AuthStorage.getName();
-    if (!mounted) return;
-    setState(() => _myName = (n ?? '').trim().toLowerCase());
+    await _load(silent: true, markRead: _messages.isEmpty);
   }
 
   bool _messagesEqual(List<dynamic> a, List<dynamic> b) {
@@ -238,11 +227,15 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
     return true;
   }
 
-  Future<void> _load({bool silent = false}) async {
+  Future<void> _load({bool silent = false, bool markRead = false}) async {
     final token = _authToken;
     if (token == null) return;
     if (!silent) setState(() => _loading = true);
-    final res = await ApiService.listMessages(token, widget.requestId);
+    final res = await ApiService.listMessages(
+      token,
+      widget.requestId,
+      markRead: markRead,
+    );
     if (!mounted) return;
     final raw = res['data'];
     final list = (raw is List) ? raw : <dynamic>[];
@@ -250,7 +243,12 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
             (res['status'] as int) >= 200 &&
             (res['status'] as int) < 300
         ? null
-        : (res['message']?.toString() ?? 'Erreur ${res['status']}');
+        : (ApiService.isTransientFailure(res)
+            ? null
+            : (res['message']?.toString() ?? 'Erreur ${res['status']}'));
+    if (list.isNotEmpty) {
+      unawaited(ApiDataCache.saveMessages(widget.requestId, list));
+    }
     final changed = !_messagesEqual(_messages, list);
     if (changed || !silent) {
       setState(() {

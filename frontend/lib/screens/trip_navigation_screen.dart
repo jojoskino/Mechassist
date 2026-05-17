@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:latlong2/latlong.dart' as osm;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -172,7 +172,7 @@ class _TripNavigationScreenState extends State<TripNavigationScreen> {
       appBar: AppBar(
         backgroundColor: FeuTheme.deepBlue,
         foregroundColor: Colors.white,
-        title: Text('Vers le client', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        title: Text('Vers le client', style: AppFonts.style(fontWeight: FontWeight.w700)),
       ),
       body: Column(
         children: [
@@ -207,12 +207,12 @@ class _TripNavigationScreenState extends State<TripNavigationScreen> {
                 children: [
                   Text(
                     widget.clientName,
-                    style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800),
+                    style: AppFonts.style(fontSize: 20, fontWeight: FontWeight.w800),
                   ),
                   if (widget.clientAddress != null && widget.clientAddress!.trim().isNotEmpty)
                     Text(
                       widget.clientAddress!,
-                      style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade700),
+                      style: AppFonts.style(fontSize: 14, color: Colors.grey.shade700),
                     ),
                   const SizedBox(height: 12),
                   Row(
@@ -304,7 +304,7 @@ class _StatChip extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15),
+                style: AppFonts.style(fontWeight: FontWeight.w700, fontSize: 15),
                 overflow: TextOverflow.ellipsis,
               ),
             ),

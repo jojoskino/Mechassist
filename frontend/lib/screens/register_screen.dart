@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -57,6 +59,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
     setState(() => isLoading = true);
+    unawaited(ApiService.warmServer(wait: false));
     final res = await ApiService.register(
       nameCtrl.text.trim(),
       emailCtrl.text.trim(),

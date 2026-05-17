@@ -1,8 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-
+import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
 import 'user_avatar.dart';
 
@@ -171,13 +170,6 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
     return Stack(
       children: [
         Positioned.fill(child: RepaintBoundary(child: widget.map)),
-        if (widget.loading)
-          const Positioned.fill(
-            child: ColoredBox(
-              color: Color(0x66FFFFFF),
-              child: Center(child: CircularProgressIndicator(color: FeuTheme.ember)),
-            ),
-          ),
         Positioned(
           top: 0,
           left: 0,
@@ -197,7 +189,7 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
                       ),
                       Text(
                         'MechAssist',
-                        style: GoogleFonts.poppins(
+                        style: AppFonts.style(
                           fontWeight: FontWeight.w800,
                           fontSize: 20,
                           color: FeuTheme.deepBlue,
@@ -378,7 +370,7 @@ class _SheetDragHeader extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: GoogleFonts.poppins(
+                        style: AppFonts.style(
                           fontSize: 21,
                           fontWeight: FontWeight.w800,
                           color: FeuTheme.charcoal,
@@ -397,7 +389,7 @@ class _SheetDragHeader extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   subtitle!,
-                                  style: GoogleFonts.poppins(
+                                  style: AppFonts.style(
                                     fontSize: 13.5,
                                     fontWeight: subtitleAccent ? FontWeight.w600 : FontWeight.w400,
                                     color: subtitleAccent
@@ -417,7 +409,7 @@ class _SheetDragHeader extends StatelessWidget {
                     Icon(Icons.keyboard_arrow_up_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.7), size: 28),
                     Text(
                       'Tirer',
-                      style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                      style: AppFonts.style(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -478,10 +470,10 @@ class _MapsSearchBar extends StatelessWidget {
               textInputAction: TextInputAction.search,
               onChanged: onChanged == null ? null : (_) => onChanged!(),
               onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
-              style: GoogleFonts.poppins(fontSize: 15),
+              style: AppFonts.style(fontSize: 15),
               decoration: InputDecoration(
                 hintText: hint,
-                hintStyle: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
+                hintStyle: AppFonts.style(color: Colors.grey.shade600, fontSize: 15),
                 prefixIcon: Icon(
                   Icons.search_rounded,
                   color: FeuTheme.deepBlue.withValues(alpha: 0.75),
@@ -597,7 +589,7 @@ class MapsFilterChip extends StatelessWidget {
               ],
               Text(
                 label,
-                style: GoogleFonts.poppins(
+                style: AppFonts.style(
                   fontSize: 13.5,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal,

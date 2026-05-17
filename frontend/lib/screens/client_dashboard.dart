@@ -5,6 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
+import '../services/api_data_cache.dart';
+import '../services/api_response_cache.dart';
+import '../services/client_config_cache.dart';
+import '../services/refresh_coordinator.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/app_notification_hub.dart';
 import '../services/profile_signals.dart';
@@ -76,6 +80,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   final TextEditingController _specialtyFilterCtrl = TextEditingController();
   final TextEditingController _mechanicKeywordCtrl = TextEditingController();
   final TextEditingController _requestSearchCtrl = TextEditingController();
+  final _refreshCoordinator = RefreshCoordinator();
 
   @override
   void initState() {
@@ -85,9 +90,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     AppNotificationHub.instance.addListener(_onNotificationsChanged);
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
     _mechanicKeywordCtrl.addListener(_onMechanicSearchChanged);
-    _loadPublicConfig();
-    _refreshAll();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshListsOnly());
+    _applyMemoryCacheInstant();
+    unawaited(_loadPublicConfig());
+    unawaited(_refreshAll(requireFreshGps: false));
+    _refreshTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshListsOnly());
     _syncPush();
     _startPositionTracking();
   }
@@ -121,16 +127,48 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (mounted) setState(() {});
   }
 
-  Future<void> _loadPublicConfig() async {
-    final c = await ApiService.getClientConfig();
-    if (!mounted) {
-      return;
+  void _applyMemoryCacheInstant() {
+    final cachedReqs = ApiDataCache.requestsSync(mechanic: false);
+    final cachedMechs = ApiDataCache.mechanicsSync();
+    var changed = false;
+    if (cachedReqs != null && cachedReqs.isNotEmpty) {
+      requests = cachedReqs;
+      changed = true;
     }
-    final raw = c['google_maps_web_api_key'];
-    final s = raw?.toString().trim();
-    setState(() {
-      _googleMapsWebKey = (s != null && s.isNotEmpty && s != 'null') ? s : null;
+    if (cachedMechs != null && cachedMechs.isNotEmpty) {
+      _apiMechanics = cachedMechs.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      _recomputeMergedMechanics();
+      changed = true;
+    }
+    if (changed) {
+      loading = false;
+      _initializing = false;
+      lastError = null;
+    }
+  }
+
+  bool _shouldPostLocation() {
+    final last = _lastLocationPost;
+    if (last == null) return true;
+    return DateTime.now().difference(last) > const Duration(minutes: 4);
+  }
+
+  void _scheduleSilentRetry() {
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      _refreshAll(silent: true, requireFreshGps: false, refreshProfile: false);
     });
+  }
+
+  String? _messageIfRealError(Map<String, dynamic> res, String fallback) {
+    if (ApiService.isTransientFailure(res)) return null;
+    return res['message']?.toString() ?? fallback;
+  }
+
+  Future<void> _loadPublicConfig() async {
+    await ClientConfigCache.get();
+    if (!mounted) return;
+    setState(() => _googleMapsWebKey = ClientConfigCache.googleMapsWebKey());
   }
 
   @override
@@ -208,10 +246,26 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
   /// Rafraîchit mécaniciens + demandes en réutilisant la position déjà connue (rapide).
   Future<void> _refreshListsOnly() async {
-    await _refreshAll(silent: true, requireFreshGps: false);
+    await _refreshAll(silent: true, requireFreshGps: false, refreshProfile: false);
   }
 
-  Future<void> _refreshAll({bool silent = false, bool requireFreshGps = true}) async {
+  Future<void> _refreshAll({
+    bool silent = false,
+    bool requireFreshGps = false,
+    bool refreshProfile = true,
+  }) async {
+    await _refreshCoordinator.run(() => _refreshAllBody(
+          silent: silent,
+          requireFreshGps: requireFreshGps,
+          refreshProfile: refreshProfile,
+        ));
+  }
+
+  Future<void> _refreshAllBody({
+    bool silent = false,
+    bool requireFreshGps = false,
+    bool refreshProfile = true,
+  }) async {
     if (!silent && _initializing) {
       setState(() => loading = true);
     }
@@ -228,85 +282,61 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }
     currentName = session['name'] ?? 'Client';
     currentRole = session['role'] ?? 'client';
-    final me = await ApiService.getMe(token);
-    final ms = me['status'] as int?;
-    if (ms != null && ms >= 200 && ms < 300) {
-      _myAvatarUrl = me['avatar_url']?.toString();
-      _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
-    }
 
     String? errorMsg;
     try {
       final reuseCoords = lat != null && lng != null && !requireFreshGps;
 
-      late final Map<String, dynamic> reqRes;
-      if (reuseCoords) {
-        reqRes = await ApiService.listRequests(token);
-      } else {
-        final parallel = await Future.wait<dynamic>([
-          _getPositionBestEffort(),
-          ApiService.listRequests(token),
-        ]);
-        final position = parallel[0] as Position?;
-        reqRes = parallel[1] as Map<String, dynamic>;
-        if (position != null) {
-          lat = position.latitude;
-          lng = position.longitude;
+      final batch = await Future.wait<dynamic>([
+        refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
+        ApiService.listRequests(token),
+        !reuseCoords ? _getPositionQuick() : Future<Position?>.value(null),
+      ]);
+      final me = batch[0] as Map<String, dynamic>;
+      final reqRes = batch[1] as Map<String, dynamic>;
+      final position = batch[2] as Position?;
+
+      if (refreshProfile) {
+        final ms = me['status'] as int?;
+        if (ms != null && ms >= 200 && ms < 300) {
+          _myAvatarUrl = me['avatar_url']?.toString();
+          _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+          final name = me['name']?.toString();
+          if (name != null && name.isNotEmpty) currentName = name;
         }
+      }
+      if (position != null) {
+        lat = position.latitude;
+        lng = position.longitude;
       }
 
       if (lat != null && lng != null) {
-        if (requireFreshGps || _lastLocationPost == null) {
-          final locFut = ApiService.updateLocation(token, lat!, lng!);
-          final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
-          final spec = _specialtyFilterCtrl.text.trim();
-          final nearbyFut = ApiService.nearbyMechanics(
-            token,
-            lat!,
-            lng!,
-            radiusKm: _searchRadiusKm,
-            minRating: minR,
-            specialty: spec.isEmpty ? null : spec,
-          );
-          final pair = await Future.wait([locFut, nearbyFut]);
-          final loc = pair[0];
-          final nearby = pair[1];
-          if ((loc['status'] as int?) != null && (loc['status'] as int) >= 400) {
-            errorMsg = loc['message']?.toString() ?? 'Erreur mise à jour position.';
-          } else {
-            _lastLocationPost = DateTime.now();
-          }
-          final ns = nearby['status'] as int?;
-          if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
-            _apiMechanics = (nearby['data'] as List)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          } else {
-            _apiMechanics = [];
-            errorMsg ??=
-                nearby['message']?.toString() ?? 'Impossible de charger les mécaniciens (code ${nearby['status']}).';
-          }
+        if (_shouldPostLocation()) {
+          _lastLocationPost = DateTime.now();
+          ApiService.postLocation(token, lat!, lng!);
+        }
+        final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
+        final spec = _specialtyFilterCtrl.text.trim();
+        final nearby = await ApiService.nearbyMechanics(
+          token,
+          lat!,
+          lng!,
+          radiusKm: _searchRadiusKm,
+          minRating: minR,
+          specialty: spec.isEmpty ? null : spec,
+        );
+        final ns = nearby['status'] as int?;
+        if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
+          _apiMechanics = (nearby['data'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          unawaited(ApiDataCache.saveMechanics(_apiMechanics));
+        } else if (!ApiService.isTransientFailure(nearby)) {
+          _apiMechanics = [];
+          errorMsg ??=
+              _messageIfRealError(nearby, 'Impossible de charger les mécaniciens (code ${nearby['status']}).');
         } else {
-          final minR = _minStarsFilter > 0 ? _minStarsFilter.toDouble() : null;
-          final spec = _specialtyFilterCtrl.text.trim();
-          final nearby = await ApiService.nearbyMechanics(
-            token,
-            lat!,
-            lng!,
-            radiusKm: _searchRadiusKm,
-            minRating: minR,
-            specialty: spec.isEmpty ? null : spec,
-          );
-          final ns = nearby['status'] as int?;
-          if (ns != null && ns >= 200 && ns < 300 && nearby['data'] is List) {
-            _apiMechanics = (nearby['data'] as List)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          } else {
-            _apiMechanics = [];
-            errorMsg ??=
-                nearby['message']?.toString() ?? 'Impossible de charger les mécaniciens (code ${nearby['status']}).';
-          }
+          _scheduleSilentRetry();
         }
         _recomputeMergedMechanics();
       } else {
@@ -324,12 +354,18 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       final rs = reqRes['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqRes['data'] is List) {
         requests = reqRes['data'] as List;
-      } else {
+        unawaited(ApiDataCache.saveRequests(requests, mechanic: false));
+      } else if (!ApiService.isTransientFailure(reqRes)) {
         requests = [];
-        errorMsg ??= reqRes['message']?.toString() ?? 'Impossible de charger tes demandes (code ${reqRes['status']}).';
+        errorMsg ??=
+            _messageIfRealError(reqRes, 'Impossible de charger tes demandes (code ${reqRes['status']}).');
+      } else {
+        _scheduleSilentRetry();
       }
     } catch (_) {
-      errorMsg ??= 'Impossible de charger les données. Vérifie ta connexion.';
+      if (requests.isEmpty && _apiMechanics.isEmpty) {
+        _scheduleSilentRetry();
+      }
     }
 
     if (!mounted) return;
@@ -358,12 +394,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         lat = pos.latitude;
         lng = pos.longitude;
         final now = DateTime.now();
-        final last = _lastLocationPost;
-        if (last == null || now.difference(last) > const Duration(seconds: 10)) {
+        if (_shouldPostLocation()) {
           _lastLocationPost = now;
           AuthStorage.getToken().then((token) {
             if (token != null) {
-              ApiService.updateLocation(token, pos.latitude, pos.longitude);
+              ApiService.postLocation(token, pos.latitude, pos.longitude);
             }
           });
         }
@@ -391,7 +426,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   /// Dernière position connue puis GPS actuel (évite d’attendre à chaque rafraîchissement).
-  Future<Position?> _getPositionBestEffort() => GpsHelper.bestPosition();
+  Future<Position?> _getPositionQuick() async {
+    final last = await GpsHelper.lastKnown();
+    if (last != null) return last;
+    return GpsHelper.bestPosition(timeout: const Duration(seconds: 4));
+  }
 
   Future<void> _recenterMap() async {
     final pos = await GpsHelper.bestPosition();
@@ -429,7 +468,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       lng = pos.longitude;
       final token = await AuthStorage.getToken();
       if (token != null) {
-        await ApiService.updateLocation(token, pos.latitude, pos.longitude);
+        ApiService.postLocation(token, pos.latitude, pos.longitude);
       }
     }
     if (!mounted) return;
@@ -554,6 +593,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }
     await GoogleSignInService.signOut();
     await AuthStorage.clear();
+    await ApiDataCache.clear();
+    ApiResponseCache.clear();
     if (!context.mounted) return;
     Navigator.pushReplacementNamed(context, '/login');
   }
@@ -868,10 +909,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         body: _initializing && loading && mapTab
             ? const Center(child: CircularProgressIndicator(color: FeuTheme.ember))
             : IndexedStack(
-                index: _tabIndex,
+                index: _tabIndex <= 1 ? 0 : _tabIndex - 1,
                 children: [
-                  _buildHomeTab(searchMode: false),
-                  _buildHomeTab(searchMode: true),
+                  _buildHomeTab(searchMode: _tabIndex == 1),
                   _buildRequestsTab(),
                   HistoryScreen(
                     requests: requests,
@@ -1132,7 +1172,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     final bottomInset = kBottomNavigationBarHeight + MediaQuery.paddingOf(context).bottom + 12;
     return MapsDiscoveryShell(
       map: _buildClientMapLayer(),
-      loading: loading,
+      loading: _initializing && loading,
       bottomInset: bottomInset,
       searchController: _mechanicKeywordCtrl,
       searchHint: searchMode ? 'Où êtes-vous ?' : 'Mécaniciens, spécialité…',
@@ -1253,7 +1293,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     });
     final token = await AuthStorage.getToken();
     if (token != null) {
-      await ApiService.updateLocation(token, pos.latitude, pos.longitude);
+      ApiService.postLocation(token, pos.latitude, pos.longitude);
     }
     return _pickupLabel();
   }
@@ -1459,7 +1499,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             child: DashboardSearchBar(
               controller: _requestSearchCtrl,
               hintText: 'Véhicule, mécanicien, statut…',
-              loading: loading,
+              loading: _initializing && loading,
               onChanged: () => setState(() {}),
             ),
           ),

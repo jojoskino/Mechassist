@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import 'api_service.dart';
+import 'client_config_cache.dart';
 
 /// Récupère un id_token Google pour l’API Laravel (audience = client Web).
 class GoogleSignInService {
@@ -12,7 +12,7 @@ class GoogleSignInService {
     if (_cachedServerClientId != null && _cachedServerClientId!.isNotEmpty) {
       return _cachedServerClientId;
     }
-    final cfg = await ApiService.getClientConfig();
+    final cfg = await ClientConfigCache.get();
     final status = cfg['status'];
     if (status is! int || status < 200 || status >= 300) {
       final msg = cfg['message']?.toString() ?? 'réponse serveur invalide';

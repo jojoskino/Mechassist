@@ -49,29 +49,19 @@ class _InterventionLocationsMapState extends State<InterventionLocationsMap> {
   @override
   void initState() {
     super.initState();
-    final key = widget.googleMapsWebApiKey?.trim() ?? '';
-    if (kIsWeb && key.isNotEmpty) {
-      _webGmapsLoading = true;
-      _webGmapsReady = false;
+    if (!kIsWeb) {
+      _prepareWebGoogleMaps();
     }
-    _prepareWebGoogleMaps();
   }
 
   @override
   void didUpdateWidget(InterventionLocationsMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.googleMapsWebApiKey != widget.googleMapsWebApiKey) {
-      final key = widget.googleMapsWebApiKey?.trim() ?? '';
+    if (!kIsWeb && oldWidget.googleMapsWebApiKey != widget.googleMapsWebApiKey) {
       setState(() {
-        if (kIsWeb && key.isNotEmpty) {
-          _webGmapsLoading = true;
-          _webGmapsReady = false;
-          _webGmapsError = null;
-        } else {
-          _webGmapsLoading = false;
-          _webGmapsReady = true;
-          _webGmapsError = null;
-        }
+        _webGmapsLoading = false;
+        _webGmapsReady = true;
+        _webGmapsError = null;
       });
       _prepareWebGoogleMaps();
     }
@@ -110,10 +100,14 @@ class _InterventionLocationsMapState extends State<InterventionLocationsMap> {
   @override
   Widget build(BuildContext context) {
     final key = widget.googleMapsWebApiKey?.trim() ?? '';
-    final useGoogleWeb =
-        kIsWeb && key.isNotEmpty && _webGmapsReady && _webGmapsError == null && !_webGmapsLoading;
+    if (kIsWeb) {
+      return _buildFlutterMap();
+    }
 
-    if (kIsWeb && key.isNotEmpty && _webGmapsLoading) {
+    final useGoogleWeb =
+        key.isNotEmpty && _webGmapsReady && _webGmapsError == null && !_webGmapsLoading;
+
+    if (key.isNotEmpty && _webGmapsLoading) {
       return const Center(child: CircularProgressIndicator(color: FeuTheme.ember));
     }
 

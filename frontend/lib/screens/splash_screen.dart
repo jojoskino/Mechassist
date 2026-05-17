@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -21,7 +23,8 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    unawaited(ApiService.warmServer(wait: false));
+    await Future<void>.delayed(const Duration(milliseconds: 120));
     if (!mounted) return;
     final session = await AuthStorage.getSessionFields();
     final token = session['token'];
@@ -33,14 +36,7 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    final me = await ApiService.getMe(token);
-    final ok = (me['status'] as int?) != null && (me['status'] as int) >= 200 && (me['status'] as int) < 300;
-    if (!ok) {
-      await AuthStorage.clear();
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/welcome');
-      return;
-    }
+    // Session locale : le tableau de bord charge le profil (évite un getMe bloquant au démarrage).
     final role = session['role'] ?? 'client';
     if (!mounted) return;
     Navigator.pushReplacementNamed(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -73,14 +73,14 @@ class _RateMechanicSheetState extends State<RateMechanicSheet> {
               Text(
                 widget.mechanicName,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800),
+                style: AppFonts.style(fontSize: 20, fontWeight: FontWeight.w800),
               ),
               if (widget.subtitle != null) ...[
                 const SizedBox(height: 4),
                 Text(
                   widget.subtitle!,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
+                  style: AppFonts.style(fontSize: 13, color: Colors.grey.shade600),
                 ),
               ],
               const SizedBox(height: 20),
@@ -109,7 +109,7 @@ class _RateMechanicSheetState extends State<RateMechanicSheet> {
                 children: _tagOptions.map((t) {
                   final selected = _tags.contains(t);
                   return FilterChip(
-                    label: Text(t, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                    label: Text(t, style: AppFonts.style(fontWeight: FontWeight.w600)),
                     selected: selected,
                     onSelected: (v) {
                       setState(() {
@@ -153,7 +153,7 @@ class _RateMechanicSheetState extends State<RateMechanicSheet> {
                   );
                 },
                 icon: const Icon(Icons.send_rounded),
-                label: Text('Soumettre', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
+                label: Text('Soumettre', style: AppFonts.style(fontWeight: FontWeight.w700, fontSize: 16)),
                 style: FilledButton.styleFrom(
                   backgroundColor: FeuTheme.deepBlue,
                   minimumSize: const Size(double.infinity, 52),
@@ -167,7 +167,7 @@ class _RateMechanicSheetState extends State<RateMechanicSheet> {
     );
   }
 
-  TextStyle get _label => GoogleFonts.poppins(
+  TextStyle get _label => AppFonts.style(
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.6,

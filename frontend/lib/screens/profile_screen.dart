@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/api_service.dart';
@@ -57,7 +57,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _loadFromSession();
     _load();
+  }
+
+  Future<void> _loadFromSession() async {
+    final fields = await AuthStorage.getSessionFields();
+    if (!mounted) return;
+    final name = fields['name']?.toString();
+    if (name != null && name.isNotEmpty) {
+      _nameCtrl.text = name;
+    }
+    _role = fields['role']?.toString() ?? 'client';
+    setState(() => _loading = false);
   }
 
   Future<void> _load() async {
@@ -173,7 +185,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: Text('Galerie', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              title: Text('Galerie', style: AppFonts.style(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickAvatar(ImageSource.gallery);
@@ -181,7 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: Text('Appareil photo', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              title: Text('Appareil photo', style: AppFonts.style(fontWeight: FontWeight.w600)),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickAvatar(ImageSource.camera);
@@ -204,7 +216,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(label, style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        title: Text(label, style: AppFonts.style(fontWeight: FontWeight.w700)),
         content: TextField(
           controller: local,
           keyboardType: keyboard,
@@ -345,13 +357,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Center(
                       child: Text(
                         _nameCtrl.text.isEmpty ? 'Profil' : _nameCtrl.text,
-                        style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800),
+                        style: AppFonts.style(fontSize: 20, fontWeight: FontWeight.w800),
                       ),
                     ),
                     Center(
                       child: Text(
                         'Utilisateur MechAssist',
-                        style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
+                        style: AppFonts.style(fontSize: 13, color: Colors.grey.shade600),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -387,7 +399,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         if (_role == 'mecanicien')
                           SwitchListTile(
                             secondary: const Icon(Icons.online_prediction_rounded, color: FeuTheme.deepBlue),
-                            title: Text('Disponible', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                            title: Text('Disponible', style: AppFonts.style(fontWeight: FontWeight.w600)),
                             subtitle: const Text('Visible sur la carte'),
                             value: _mechanicAvailable,
                             activeTrackColor: FeuTheme.deepBlue,
@@ -395,7 +407,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         SwitchListTile(
                           secondary: const Icon(Icons.notifications_outlined, color: FeuTheme.deepBlue),
-                          title: Text('Notifications push', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                          title: Text('Notifications push', style: AppFonts.style(fontWeight: FontWeight.w600)),
                           subtitle: const Text('Alertes demandes et messages'),
                           value: _pushEnabled,
                           activeTrackColor: FeuTheme.deepBlue,

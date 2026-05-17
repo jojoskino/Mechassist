@@ -2,7 +2,7 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -112,7 +112,7 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
             children: [
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined, color: FeuTheme.deepBlue),
-                title: Text('Galerie', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                title: Text('Galerie', style: AppFonts.style(fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(ctx);
                   widget.onPickGallery();
@@ -121,7 +121,7 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
               if (!kIsWeb && widget.onPickCamera != null)
                 ListTile(
                   leading: const Icon(Icons.photo_camera_outlined, color: FeuTheme.deepBlue),
-                  title: Text('Appareil photo', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  title: Text('Appareil photo', style: AppFonts.style(fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(ctx);
                     widget.onPickCamera!();
@@ -227,10 +227,10 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
                               readOnly: widget.readOnly,
                               minLines: 1,
                               maxLines: 5,
-                              style: GoogleFonts.poppins(fontSize: 15.5, color: FeuTheme.charcoal),
+                              style: AppFonts.style(fontSize: 15.5, color: FeuTheme.charcoal),
                               decoration: InputDecoration(
                                 hintText: widget.hintText,
-                                hintStyle: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
+                                hintStyle: AppFonts.style(color: Colors.grey.shade600, fontSize: 15),
                                 border: InputBorder.none,
                                 contentPadding: const EdgeInsets.symmetric(vertical: 11),
                               ),
@@ -300,7 +300,7 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   'Enregistrement… relâche pour envoyer',
-                  style: GoogleFonts.poppins(
+                  style: AppFonts.style(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: FeuTheme.ember,
@@ -312,7 +312,7 @@ class _ChatComposerBarState extends State<ChatComposerBar> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   'Micro indisponible',
-                  style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey.shade600),
+                  style: AppFonts.style(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ),
           ],

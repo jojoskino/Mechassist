@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/feu_theme.dart';
@@ -89,7 +89,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   const SizedBox(width: 10),
                   Text(
                     'MechAssist',
-                    style: GoogleFonts.poppins(
+                    style: AppFonts.style(
                       fontWeight: FontWeight.w800,
                       fontSize: 20,
                       color: FeuTheme.deepBlue,
@@ -98,7 +98,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   const Spacer(),
                   TextButton(
                     onPressed: () => _finish(toRegister: false),
-                    child: Text('Passer', style: GoogleFonts.poppins(color: Colors.grey.shade600)),
+                    child: Text('Passer', style: AppFonts.style(color: Colors.grey.shade600)),
                   ),
                 ],
               ),
@@ -137,7 +137,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     icon: Icon(_page < _pages.length - 1 ? Icons.arrow_forward_rounded : Icons.login_rounded),
                     label: Text(
                       _page < _pages.length - 1 ? 'Suivant' : 'Commencer',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
+                      style: AppFonts.style(fontWeight: FontWeight.w700, fontSize: 16),
                     ),
                     style: FilledButton.styleFrom(
                       backgroundColor: FeuTheme.deepBlue,
@@ -155,7 +155,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         side: const BorderSide(color: FeuTheme.deepBlue),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: Text('Créer un compte', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      child: Text('Créer un compte', style: AppFonts.style(fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ],
@@ -249,7 +249,7 @@ class _OnboardIllustration extends StatelessWidget {
                         children: page.chips
                             .map(
                               (c) => Chip(
-                                label: Text(c, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600)),
+                                label: Text(c, style: AppFonts.style(fontSize: 12, fontWeight: FontWeight.w600)),
                                 backgroundColor: Colors.white,
                                 side: BorderSide(color: page.accent.withValues(alpha: 0.35)),
                               ),
@@ -266,7 +266,7 @@ class _OnboardIllustration extends StatelessWidget {
           Text(
             page.title,
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
+            style: AppFonts.style(
               fontSize: 24,
               fontWeight: FontWeight.w800,
               color: FeuTheme.charcoal,
@@ -276,7 +276,7 @@ class _OnboardIllustration extends StatelessWidget {
           Text(
             page.body,
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 15, height: 1.45, color: Colors.grey.shade700),
+            style: AppFonts.style(fontSize: 15, height: 1.45, color: Colors.grey.shade700),
           ),
         ],
       ),

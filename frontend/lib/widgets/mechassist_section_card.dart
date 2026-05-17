@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../theme/feu_theme.dart';
 
@@ -15,7 +15,7 @@ class MechAssistSectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
       child: Text(
         text.toUpperCase(),
-        style: GoogleFonts.poppins(
+        style: AppFonts.style(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.8,
@@ -77,7 +77,7 @@ class MechAssistSettingsTile extends StatelessWidget {
           : null,
       title: Text(
         title,
-        style: GoogleFonts.poppins(
+        style: AppFonts.style(
           fontSize: 13,
           color: Colors.grey.shade600,
           fontWeight: FontWeight.w500,
@@ -86,7 +86,7 @@ class MechAssistSettingsTile extends StatelessWidget {
       subtitle: subtitle != null
           ? Text(
               subtitle!,
-              style: GoogleFonts.poppins(
+              style: AppFonts.style(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: FeuTheme.charcoal,

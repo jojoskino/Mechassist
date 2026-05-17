@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
+import 'api_response_cache.dart';
 
 /// URL de l’API Laravel. Sur émulateur Android : `10.0.2.2`. Sur téléphone physique :
 /// enregistre l’URL dans **Aide** ([ApiConfig]) ou compile avec `--dart-define=API_BASE_URL=...`.
@@ -19,10 +20,7 @@ class ApiService {
     if (stored != null && stored.isNotEmpty) {
       return '${stored.replaceAll(RegExp(r'/+$'), '')}/api';
     }
-    if (kIsWeb) {
-      return 'http://127.0.0.1:8000/api';
-    }
-    // Téléphone / tablette : API Render (10.0.2.2 ne marche que sur émulateur — voir Aide pour IP locale).
+    // Web + mobile : API Render par défaut (localhost uniquement si surcharge dans Aide ou dart-define).
     return '${ApiConfig.productionOrigin}/api';
   }
 
@@ -44,15 +42,60 @@ class ApiService {
   /// Interface Swagger (L5-Swagger), même origine que l’API.
   static String get documentationUrl => '$_apiRoot/documentation';
 
-  /// Vérifie que le backend répond (`GET /up`), pour tester l’URL depuis un téléphone.
-  static Future<bool> pingHealth({Duration timeout = const Duration(seconds: 8)}) async {
-    final origin = serverOrigin.replaceAll(RegExp(r'/+$'), '');
-    try {
-      final response = await http.get(Uri.parse('$origin/up')).timeout(timeout);
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+  static final http.Client _client = http.Client();
+
+  static bool _serverWarm = false;
+  static Future<bool>? _warming;
+
+  /// Réveille Render. [wait] : attendre que le serveur réponde (splash / login).
+  static Future<bool> warmServer({bool wait = true}) {
+    if (_serverWarm && !wait) return Future.value(true);
+    _warming ??= _doWarm();
+    final f = _warming!;
+    if (!wait) return f;
+    return f;
+  }
+
+  static Future<bool> _doWarm() async {
+    for (var i = 0; i < 3; i++) {
+      if (await pingHealth(timeout: const Duration(seconds: 6))) {
+        _serverWarm = true;
+        _warming = null;
+        return true;
+      }
+      if (i < 2) await Future<void>.delayed(Duration(milliseconds: 400 + i * 300));
     }
+    _warming = null;
+    return false;
+  }
+
+  /// Vérifie que le backend répond (`/api/health` puis `/up`).
+  static Future<bool> pingHealth({Duration timeout = const Duration(seconds: 5)}) async {
+    final origin = serverOrigin.replaceAll(RegExp(r'/+$'), '');
+    for (final path in ['/api/health', '/up']) {
+      try {
+        final response = await _client.get(Uri.parse('$origin$path')).timeout(timeout);
+        if (response.statusCode == 200) {
+          _serverWarm = true;
+          return true;
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// Erreur réseau transitoire (cold start Render) — ne pas afficher à l’utilisateur.
+  static bool isTransientFailure(Map<String, dynamic> res) {
+    final status = res['status'] as int? ?? res['http_status'] as int?;
+    if (status == 408 || status == 0 || status == 502 || status == 503 || status == 504) {
+      return true;
+    }
+    final msg = (res['message'] ?? '').toString().toLowerCase();
+    return msg.contains('délai') ||
+        msg.contains('delai') ||
+        msg.contains('temps') ||
+        msg.contains('injoignable') ||
+        msg.contains('timeout');
   }
 
   /// URL publique absolue pour un chemin renvoyé par l’API (ex. `photo_url`).
@@ -129,39 +172,62 @@ class ApiService {
     }
   }
 
-  /// Sans timeout, une API injoignable bloque l’UI (chargement infini). 25 s max par requête.
-  static const Duration _httpTimeout = Duration(seconds: 25);
+  static const Duration _httpTimeoutWarm = Duration(seconds: 14);
+  static const Duration _httpTimeoutCold = Duration(seconds: 22);
 
-  static Future<http.Response> _tw(Future<http.Response> future) {
-    return future.timeout(
-      _httpTimeout,
-      onTimeout: () => http.Response(
-        '{"message":"Délai dépassé : serveur ou réseau injoignable. Vérifie l’URL API (ex. IP du PC, VPN) et que le backend tourne."}',
-        408,
-        headers: {'content-type': 'application/json'},
-      ),
-    );
+  static const _transientBody = '{"message":"","transient":true}';
+
+  static Future<http.Response> _tw(Future<http.Response> Function() request) async {
+    final attempts = _serverWarm ? 1 : 2;
+    final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) {
+        unawaited(warmServer(wait: false));
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      }
+      try {
+        final response = await request().timeout(timeout);
+        if (_shouldRetryStatus(response.statusCode) && attempt < attempts - 1) {
+          continue;
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          _serverWarm = true;
+        }
+        return response;
+      } on TimeoutException {
+        if (attempt < attempts - 1) continue;
+      }
+    }
+    return http.Response(_transientBody, 408, headers: {'content-type': 'application/json'});
   }
 
+  static bool _shouldRetryStatus(int code) =>
+      code == 408 || code == 502 || code == 503 || code == 504;
+
   static Future<http.Response> _twMultipart(http.BaseRequest request) async {
-    final client = http.Client();
-    try {
-      final streamed = await client.send(request).timeout(_httpTimeout);
-      return await http.Response.fromStream(streamed).timeout(_httpTimeout);
-    } on TimeoutException {
-      return http.Response(
-        '{"message":"Délai dépassé lors de l’envoi du fichier."}',
-        408,
-        headers: {'content-type': 'application/json'},
-      );
-    } finally {
-      client.close();
+    final timeout = _serverWarm ? _httpTimeoutWarm : _httpTimeoutCold;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await Future<void>.delayed(const Duration(milliseconds: 400));
+      try {
+        final streamed = await _client.send(request).timeout(timeout);
+        final response = await http.Response.fromStream(streamed).timeout(timeout);
+        if (_shouldRetryStatus(response.statusCode) && attempt == 0) continue;
+        return response;
+      } on TimeoutException {
+        if (attempt == 0) continue;
+      }
     }
+    return http.Response(_transientBody, 408, headers: {'content-type': 'application/json'});
+  }
+
+  /// Mise à jour position sans bloquer l’UI.
+  static void postLocation(String token, double latitude, double longitude) {
+    unawaited(updateLocation(token, latitude, longitude));
   }
 
   static Future<Map<String, dynamic>> getClientConfig() async {
     try {
-      final response = await _tw(http.get(
+      final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/client-config'),
         headers: const {'Accept': 'application/json'},
       ));
@@ -177,7 +243,7 @@ class ApiService {
     String? fcmToken,
   }) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/auth/google'),
         headers: {
           'Content-Type': 'application/json',
@@ -201,7 +267,7 @@ class ApiService {
     String? fcmToken,
   ) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/login'),
         headers: {
           'Content-Type': 'application/json',
@@ -230,7 +296,7 @@ class ApiService {
     String? mechanicSpecialty,
   }) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/register'),
         headers: {
           'Content-Type': 'application/json',
@@ -256,7 +322,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> logout(String token) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/logout'),
         headers: {
           'Content-Type': 'application/json',
@@ -270,9 +336,13 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> getMe(String token) async {
+  static Future<Map<String, dynamic>> getMe(String token, {bool force = false}) async {
+    if (!force) {
+      final cached = ApiResponseCache.meIfFresh(token);
+      if (cached != null) return cached;
+    }
     try {
-      final response = await _tw(http.get(
+      final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/me'),
         headers: {
           'Content-Type': 'application/json',
@@ -280,7 +350,12 @@ class ApiService {
           'Authorization': 'Bearer $token',
         },
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        ApiResponseCache.putMe(token, body);
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -300,7 +375,7 @@ class ApiService {
     double longitude,
   ) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/location'),
         headers: _authHeaders(token),
         body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
@@ -332,7 +407,7 @@ class ApiService {
         q['specialty'] = specialty.trim();
       }
       final uri = Uri.parse('$_apiRoot/mechanics/nearby').replace(queryParameters: q);
-      final response = await _tw(http.get(uri, headers: _authHeaders(token, json: false)));
+      final response = await _tw(() => _client.get(uri, headers: _authHeaders(token, json: false)));
       final decoded = _tryJsonDecode(response.body);
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return {'status': response.statusCode, 'data': decoded};
@@ -382,7 +457,7 @@ class ApiService {
         return _parseBody(response);
       }
 
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests'),
         headers: _authHeaders(token),
         body: jsonEncode({
@@ -402,7 +477,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> forgotPassword(String email) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/forgot-password'),
         headers: {
           'Content-Type': 'application/json',
@@ -423,7 +498,7 @@ class ApiService {
     required String passwordConfirmation,
   }) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/reset-password'),
         headers: {
           'Content-Type': 'application/json',
@@ -448,7 +523,7 @@ class ApiService {
       if (status != null && status.trim().isNotEmpty) {
         uri = uri.replace(queryParameters: {'status': status.trim()});
       }
-      final response = await _tw(http.get(
+      final response = await _tw(() => _client.get(
         uri,
         headers: _authHeaders(token, json: false),
       ));
@@ -467,9 +542,17 @@ class ApiService {
   }
 
   /// Détail d’une demande : conserve le champ JSON `status` (workflow). Utiliser `http_status` pour le code HTTP.
-  static Future<Map<String, dynamic>> getInterventionRequest(String token, int id) async {
+  static Future<Map<String, dynamic>> getInterventionRequest(
+    String token,
+    int id, {
+    bool force = false,
+  }) async {
+    if (!force) {
+      final cached = ApiResponseCache.requestIfFresh(id);
+      if (cached != null) return cached;
+    }
     try {
-      final response = await _tw(http.get(
+      final response = await _tw(() => _client.get(
         Uri.parse('$_apiRoot/requests/$id'),
         headers: {
           'Accept': 'application/json',
@@ -491,10 +574,12 @@ class ApiService {
           'http_status': code,
         };
       }
-      return {
+      final out = {
         ...decoded,
         'http_status': code,
       };
+      ApiResponseCache.putRequest(id, out);
+      return out;
     } catch (e) {
       return {'http_status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -505,12 +590,17 @@ class ApiService {
     Map<String, dynamic> fields,
   ) async {
     try {
-      final response = await _tw(http.patch(
+      final response = await _tw(() => _client.patch(
         Uri.parse('$_apiRoot/profile'),
         headers: _authHeaders(token),
         body: jsonEncode(fields),
       ));
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        ApiResponseCache.invalidateMe();
+      }
+      return body;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -543,7 +633,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> cancelClientRequest(String token, int id) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$id/cancel'),
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
@@ -556,7 +646,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> acceptRequest(String token, int id) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$id/accept'),
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
@@ -569,7 +659,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> declineRequest(String token, int id) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$id/decline'),
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
@@ -583,7 +673,7 @@ class ApiService {
   /// Le mécanicien indique que l’intervention sur place est terminée (avant clôture client).
   static Future<Map<String, dynamic>> mechanicMarkRequestComplete(String token, int id) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$id/mechanic-complete'),
         headers: _authHeaders(token),
         body: jsonEncode(<String, dynamic>{}),
@@ -601,7 +691,7 @@ class ApiService {
     String outcome,
   ) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$requestId/outcome'),
         headers: _authHeaders(token),
         body: jsonEncode({'outcome': outcome}),
@@ -619,7 +709,7 @@ class ApiService {
     String? comment,
   }) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$requestId/rating'),
         headers: _authHeaders(token),
         body: jsonEncode({
@@ -633,14 +723,33 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> listMessages(String token, int requestId) async {
+  static Future<Map<String, dynamic>> listMessages(
+    String token,
+    int requestId, {
+    bool markRead = false,
+    bool force = false,
+  }) async {
+    if (!force && !markRead) {
+      final cached = ApiResponseCache.messagesIfFresh(requestId);
+      if (cached != null) {
+        return {'status': 200, 'data': cached};
+      }
+    }
     try {
-      final response = await _tw(http.get(
-        Uri.parse('$_apiRoot/requests/$requestId/messages'),
+      final uri = markRead
+          ? Uri.parse('$_apiRoot/requests/$requestId/messages').replace(
+              queryParameters: const {'mark_read': '1'},
+            )
+          : Uri.parse('$_apiRoot/requests/$requestId/messages');
+      final response = await _tw(() => _client.get(
+        uri,
         headers: _authHeaders(token, json: false),
       ));
       final decoded = _tryJsonDecode(response.body);
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (decoded is List) {
+          ApiResponseCache.putMessages(requestId, decoded);
+        }
         return {'status': response.statusCode, 'data': decoded};
       }
       final msg = decoded is Map ? decoded['message']?.toString() : null;
@@ -677,7 +786,12 @@ class ApiService {
         http.MultipartFile.fromBytes('media', bytes, filename: filename),
       );
       final response = await _twMultipart(request);
-      return _parseBody(response);
+      final parsed = _parseBody(response);
+      final st = parsed['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        ApiResponseCache.invalidateMessages(requestId);
+      }
+      return parsed;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -689,12 +803,17 @@ class ApiService {
     String body,
   ) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/requests/$requestId/messages'),
         headers: _authHeaders(token),
         body: jsonEncode({'body': body}),
       ));
-      return _parseBody(response);
+      final parsed = _parseBody(response);
+      final st = parsed['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        ApiResponseCache.invalidateMessages(requestId);
+      }
+      return parsed;
     } catch (e) {
       return {'status': 0, 'message': 'Erreur réseau : $e'};
     }
@@ -702,7 +821,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> touchPresence(String token) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/presence/touch'),
         headers: _authHeaders(token),
       ));
@@ -717,7 +836,7 @@ class ApiService {
     String? fcmToken,
   ) async {
     try {
-      final response = await _tw(http.post(
+      final response = await _tw(() => _client.post(
         Uri.parse('$_apiRoot/push/token'),
         headers: _authHeaders(token),
         body: jsonEncode({'fcm_token': fcmToken}),

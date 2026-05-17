@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 
 import '../services/app_notification_hub.dart';
 import '../services/notification_navigation.dart';
@@ -61,14 +61,14 @@ class _NotificationsPanelState extends State<NotificationsPanel> {
               const SizedBox(height: 12),
               Text(
                 'Aucune notification',
-                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
+                style: AppFonts.style(fontSize: 16, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 6),
               Text(
                 'Les messages et mises à jour de demandes apparaîtront ici.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(color: Colors.grey.shade700),
+                style: AppFonts.style(color: Colors.grey.shade700),
               ),
             ],
           ),
@@ -89,14 +89,14 @@ class _NotificationsPanelState extends State<NotificationsPanel> {
             backgroundColor: FeuTheme.ember.withValues(alpha: 0.15),
             child: Icon(_iconFor(n.type), color: FeuTheme.deepBlue),
           ),
-          title: Text(n.title, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          title: Text(n.title, style: AppFonts.style(fontWeight: FontWeight.w600)),
           subtitle: Text(
             n.body.isEmpty ? n.type : n.body,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(fontSize: 13),
+            style: AppFonts.style(fontSize: 13),
           ),
-          trailing: Text(time, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+          trailing: Text(time, style: AppFonts.style(fontSize: 12, color: Colors.grey.shade600)),
           onTap: () {
             _hub.markAllRead();
             NotificationNavigation.handleDataMap(n.data);
@@ -117,14 +117,14 @@ class NotificationsPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: FeuTheme.paper,
       appBar: AppBar(
-        title: Text('Notifications', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        title: Text('Notifications', style: AppFonts.style(fontWeight: FontWeight.w700)),
         backgroundColor: FeuTheme.deepBlue,
         foregroundColor: Colors.white,
         actions: [
           if (hub.items.isNotEmpty)
             TextButton(
               onPressed: hub.clear,
-              child: Text('Effacer', style: GoogleFonts.poppins(color: Colors.white)),
+              child: Text('Effacer', style: AppFonts.style(color: Colors.white)),
             ),
         ],
       ),
