@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/push_sync.dart';
@@ -84,6 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => isLoading = false);
 
     if (res['status'] == 200 && res['token'] != null) {
+      ApiKeepAlive.instance.warmOnAuthEntry();
       final user = res['user'] as Map<String, dynamic>? ?? {};
       final apiToken = res['token'].toString();
       await _persistRemember();

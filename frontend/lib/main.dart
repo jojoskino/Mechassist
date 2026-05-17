@@ -36,6 +36,7 @@ void main() async {
   await ApiConfig.load();
   await ApiConfig.ensureProductionDefault();
   await ApiDataCache.preload();
+  // PERF: Keep-alive sans ping périodique — warm au splash / login / reprise app.
   ApiKeepAlive.instance.start();
   unawaited(ApiService.warmServer(wait: false));
   unawaited(ClientConfigCache.get());

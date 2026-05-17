@@ -1,11 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/push_sync.dart';
+import '../utils/gps_position_tracker.dart';
 import 'welcome_screen.dart';
 import '../widgets/mechassist_logo.dart';
 
@@ -18,6 +19,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   String _status = 'Chargement…';
+  bool _backendReady = false;
 
   @override
   void initState() {
@@ -26,14 +28,13 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    if (kIsWeb) {
-      if (mounted) setState(() => _status = 'Connexion au serveur…');
-      await ApiService.ensureBackendReady(maxWait: const Duration(seconds: 120));
-    } else {
-      unawaited(ApiService.warmServer(wait: false));
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    // PERF: Warm backend en arrière-plan — ne bloque pas la navigation (max 8 s).
+    unawaited(_warmBackendInBackground());
+    ApiKeepAlive.instance.warmOnAuthEntry();
+
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     if (!mounted) return;
+
     final session = await AuthStorage.getSessionFields();
     final token = session['token'];
     if (token == null || token.isEmpty) {
@@ -52,6 +53,22 @@ class _SplashScreenState extends State<SplashScreen> {
       role == 'mecanicien' ? '/mecanicien' : '/client',
     );
     Future<void>.microtask(() => PushSync.syncToken());
+  }
+
+  Future<void> _warmBackendInBackground() async {
+    if (mounted) {
+      setState(() => _status = 'Connexion au serveur…');
+    }
+    final ok = await ApiService.ensureBackendReady(maxWait: perfSplashBackendMaxWait);
+    if (!mounted) return;
+    setState(() {
+      _backendReady = ok;
+      if (!ok) {
+        _status = 'Serveur lent — vous pouvez continuer';
+      } else {
+        _status = 'Prêt';
+      }
+    });
   }
 
   @override
@@ -93,6 +110,18 @@ class _SplashScreenState extends State<SplashScreen> {
                   fontSize: 14,
                 ),
               ),
+              if (!_backendReady && _status.contains('serveur'))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'L’application s’ouvre pendant la connexion.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 20),
               const SizedBox(
                 width: 40,
