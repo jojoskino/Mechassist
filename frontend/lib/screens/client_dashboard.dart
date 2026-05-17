@@ -16,6 +16,8 @@ import '../services/profile_signals.dart';
 import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
+import '../utils/gps_position_tracker.dart';
+import '../services/api_keep_alive.dart';
 import '../utils/list_search.dart';
 import '../utils/phone_launch.dart';
 import '../widgets/dashboard_search_bar.dart';
@@ -86,6 +88,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   final TextEditingController _mechanicKeywordCtrl = TextEditingController();
   final TextEditingController _requestSearchCtrl = TextEditingController();
   final _refreshCoordinator = RefreshCoordinator();
+  // PERF: Position carte isolée (ValueNotifier) — pas de setState à chaque tick GPS.
+  final _gpsTracker = GpsPositionTracker();
+  bool _appInForeground = true;
+  ThemeData? _dashboardTheme;
 
   @override
   void initState() {
@@ -127,26 +133,18 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     });
   }
 
-  bool get _hasActiveClientFlow {
-    return requests.any((raw) {
-      final s = (raw is Map ? raw['status'] : null)?.toString();
-      return s == 'pending' || s == 'accepted' || s == 'in_progress';
-    });
-  }
-
   void _scheduleRefreshTimer() {
     _refreshTimer?.cancel();
-    final interval = _hasActiveClientFlow
-        ? const Duration(seconds: 5)
-        : const Duration(seconds: 12);
-    _refreshTimer = Timer.periodic(interval, (_) => _onPeriodicRefresh());
+    // PERF: Pas de polling en arrière-plan ; 30 s minimum au premier plan.
+    if (!_appInForeground) return;
+    _refreshTimer = Timer.periodic(perfDashboardPollInterval, (_) => _onPeriodicRefresh());
   }
 
   void _onPeriodicRefresh() {
-    if (!mounted) return;
+    if (!mounted || !_appInForeground) return;
     _refreshTick++;
     unawaited(_refreshRequestsOnly());
-    if (_refreshTick % 6 == 0 && lat != null && lng != null) {
+    if (_refreshTick % 2 == 0 && lat != null && lng != null) {
       AuthStorage.getToken().then((token) {
         if (token != null) unawaited(_fetchNearbyInBackground(token));
       });
@@ -212,7 +210,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   void _onMechanicSearchChanged() {
-    if (mounted) setState(() {});
+    // PERF: Le sheet écoute le contrôleur via ValueListenableBuilder — pas de rebuild global.
   }
 
   void _applyMemoryCacheInstant() {
@@ -266,8 +264,19 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(ApiService.warmServer(wait: false));
-      _refreshAll(silent: true, requireFreshGps: false);
+      _appInForeground = true;
+      ApiKeepAlive.instance.warmIfCold();
+      _scheduleRefreshTimer();
+      // PERF: Un seul refresh à la reprise (pas de rafale).
+      unawaited(_refreshRequestsOnly(forceNetwork: !ApiService.isServerWarm));
+      if (!ApiService.isServerWarm) {
+        unawaited(_refreshAll(silent: true, requireFreshGps: false, refreshProfile: false));
+      }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _appInForeground = false;
+      _refreshTimer?.cancel();
     }
   }
 
@@ -280,11 +289,17 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     mechanics = List<dynamic>.from(_apiMechanics);
   }
 
+  void _syncLatLngFromTracker(GpsCoords coords) {
+    lat = coords.latitude;
+    lng = coords.longitude;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _positionSub?.cancel();
+    _gpsTracker.dispose();
     _specialtyFilterCtrl.dispose();
     _mechanicKeywordCtrl.dispose();
     _requestSearchCtrl.dispose();
@@ -411,7 +426,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
       final batch = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token, force: !silent),
+        // PERF: Cache API sauf refresh utilisateur explicite (silent=false).
+        ApiService.listRequests(token, force: !silent && !_initializing),
         !reuseCoords ? _getPositionQuick() : Future<Position?>.value(null),
         (reuseCoords && lat != null && lng != null)
             ? ApiService.nearbyMechanics(
@@ -441,6 +457,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       if (position != null) {
         lat = position.latitude;
         lng = position.longitude;
+        _gpsTracker.emitImmediate(position.latitude, position.longitude);
       }
 
       final rs = reqRes['status'] as int?;
@@ -522,27 +539,26 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (!await _ensureLocationPermission()) {
       return;
     }
-    final settings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: kIsWeb ? 0 : 12,
-    );
+    // PERF: medium + distanceFilter Web 30 m / mobile 12 m.
+    final settings = perfLocationStreamSettings();
     _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen(
       (pos) {
-        lat = pos.latitude;
-        lng = pos.longitude;
-        final now = DateTime.now();
-        if (_shouldPostLocation()) {
-          _lastLocationPost = now;
-          AuthStorage.getToken().then((token) {
-            if (token != null) {
-              ApiService.postLocation(token, pos.latitude, pos.longitude);
+        _gpsTracker.handlePosition(
+          pos,
+          onSignificant: (plat, plng) {
+            _syncLatLngFromTracker(GpsCoords(plat, plng));
+            final now = DateTime.now();
+            if (_shouldPostLocation()) {
+              _lastLocationPost = now;
+              AuthStorage.getToken().then((token) {
+                if (token != null) {
+                  ApiService.postLocation(token, plat, plng);
+                }
+              });
             }
-          });
-        }
-        _recomputeMergedMechanics();
-        if (mounted) {
-          setState(() {});
-        }
+            _recomputeMergedMechanics();
+          },
+        );
       },
       onError: (_) {},
     );
@@ -574,6 +590,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (pos != null) {
       lat = pos.latitude;
       lng = pos.longitude;
+      _gpsTracker.emitImmediate(pos.latitude, pos.longitude);
       await _refreshAll(silent: false, requireFreshGps: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -983,21 +1000,26 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     }
   }
 
+  ThemeData _dashboardThemeOf(BuildContext context) {
+    // PERF: Thème dashboard calculé une fois (pas de copyWith à chaque build).
+    return _dashboardTheme ??= Theme.of(context).copyWith(
+          cardTheme: CardThemeData(
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
+            ),
+          ),
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mapTab = _tabIndex == 0 || _tabIndex == 1;
     return Theme(
-      data: Theme.of(context).copyWith(
-        cardTheme: CardThemeData(
-          elevation: 0,
-          surfaceTintColor: Colors.transparent,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
-          ),
-        ),
-      ),
+      data: _dashboardThemeOf(context),
       child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: FeuTheme.pageGrey,
@@ -1182,14 +1204,25 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Widget _buildClientMapLayer() {
-    if (lat != null && lng != null) {
-      return MechanicNearbyMap(
-        clientLat: lat!,
-        clientLng: lng!,
-        mechanics: _displayMechanics.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
-        googleMapsWebApiKey: _googleMapsWebKey,
-      );
-    }
+    // PERF: Rebuild carte uniquement quand la position notifiée change.
+    return ValueListenableBuilder<GpsCoords?>(
+      valueListenable: _gpsTracker.position,
+      builder: (context, coords, _) {
+        final c = coords ?? (lat != null && lng != null ? GpsCoords(lat!, lng!) : null);
+        if (c != null) {
+          return MechanicNearbyMap(
+            clientLat: c.latitude,
+            clientLng: c.longitude,
+            mechanics: _displayMechanics.map((m) => Map<String, dynamic>.from(m as Map)).toList(),
+            googleMapsWebApiKey: _googleMapsWebKey,
+          );
+        }
+        return _buildMapPlaceholder();
+      },
+    );
+  }
+
+  Widget _buildMapPlaceholder() {
     return ColoredBox(
       color: const Color(0xFFE8ECEF),
       child: Center(
@@ -1217,6 +1250,17 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         ),
       ),
     );
+  }
+
+  List<dynamic> _filterDisplayMechanics(String query) {
+    return mechanics.where((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      return matchesListSearch(query, [
+        m['name']?.toString(),
+        m['mechanic_specialty']?.toString(),
+        m['phone']?.toString(),
+      ]);
+    }).toList();
   }
 
   void _openMechanicProfile(Map<String, dynamic> m) {
@@ -1321,6 +1365,13 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     );
   }
 
+  String _mechanicsSheetSubtitle(bool searchMode) {
+    if (lat == null && _gpsTracker.position.value == null) {
+      return 'Localisation requise';
+    }
+    return '${_displayMechanics.length} résultat(s) · rayon ${_searchRadiusKm.round()} km';
+  }
+
   Widget _buildHomeTab({bool searchMode = false}) {
     final bottomInset = kBottomNavigationBarHeight + MediaQuery.paddingOf(context).bottom + 12;
     return MapsDiscoveryShell(
@@ -1330,7 +1381,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       searchController: _mechanicKeywordCtrl,
       searchHint: searchMode ? 'Où êtes-vous ?' : 'Mécaniciens, spécialité…',
       searchHintGps: searchMode,
-      onSearch: () => setState(() {}),
+      onSearch: () {},
       initialSheetFraction: searchMode ? 0.48 : 0.38,
       onRecenter: _recenterMap,
       onPrimaryFab: () => _refreshAll(silent: true, requireFreshGps: false),
@@ -1356,9 +1407,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       },
       filterChips: _clientFilterChips(),
       sheetTitle: searchMode ? 'Recherche' : 'Mécaniciens proches',
-      sheetSubtitle: lat == null
-          ? 'Localisation requise'
-          : '${_displayMechanics.length} résultat(s) · rayon ${_searchRadiusKm.round()} km',
+      sheetSubtitle: _mechanicsSheetSubtitle(searchMode),
       subtitleAccent: !searchMode && _displayMechanics.isNotEmpty,
       sheetHeaderExtra: searchMode
           ? null
@@ -1383,30 +1432,44 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
             )
           : null,
       onSheetRefresh: () => _refreshAll(silent: false, requireFreshGps: true),
-      buildSheetBody: () {
-        return [
-          if (_displayMechanics.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                mechanics.isEmpty
-                    ? 'Aucun mécanicien dans cette zone. Élargis le rayon ou réessaie.'
-                    : 'Aucun résultat pour cette recherche.',
-                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-              ),
+      buildSheetBody: () => [
+        // PERF: Liste virtualisée + rebuild filtre sans setState global.
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _mechanicKeywordCtrl,
+          builder: (context, _, __) {
+            final filtered = _filterDisplayMechanics(_mechanicKeywordCtrl.text);
+            if (filtered.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  mechanics.isEmpty
+                      ? 'Aucun mécanicien dans cette zone. Élargis le rayon ou réessaie.'
+                      : 'Aucun résultat pour cette recherche.',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                ),
+              );
+            }
+            return ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: filtered.length,
+              itemBuilder: (context, index) {
+                final m = Map<String, dynamic>.from(filtered[index] as Map);
+                return _buildMechanicResultTile(m);
+              },
+            );
+          },
+        ),
+        if (kIsWeb && _showWebMapHint)
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Carte web', style: TextStyle(fontSize: 14)),
+            trailing: IconButton(
+              icon: const Icon(Icons.close, size: 20),
+              onPressed: () => setState(() => _showWebMapHint = false),
             ),
-          ..._displayMechanics.map((raw) => _buildMechanicResultTile(Map<String, dynamic>.from(raw as Map))),
-          if (kIsWeb && _showWebMapHint)
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('Carte web', style: TextStyle(fontSize: 14)),
-              trailing: IconButton(
-                icon: const Icon(Icons.close, size: 20),
-                onPressed: () => setState(() => _showWebMapHint = false),
-              ),
-            ),
-        ];
-      },
+          ),
+      ],
     );
   }
 
@@ -1440,10 +1503,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   Future<String?> _refreshLocationForRequest() async {
     final pos = await GpsHelper.bestPosition();
     if (pos == null || !mounted) return null;
-    setState(() {
-      lat = pos.latitude;
-      lng = pos.longitude;
-    });
+    lat = pos.latitude;
+    lng = pos.longitude;
+    _gpsTracker.emitImmediate(pos.latitude, pos.longitude);
     final token = await AuthStorage.getToken();
     if (token != null) {
       ApiService.postLocation(token, pos.latitude, pos.longitude);
@@ -1613,95 +1675,114 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     final active = _activeAcceptedRequest();
     final mechanic = active != null ? _mechanicFromRequest(active) : null;
     final activeId = active != null ? ApiService.parseIntId(active['id']) : null;
+    const headerCount = 3;
 
     return RefreshIndicator(
       onRefresh: () => _refreshAll(silent: true, requireFreshGps: false),
       color: FeuTheme.ember,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.zero,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-            child: Text(
-              'Mes demandes',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: FeuTheme.charcoal,
-              ),
-            ),
-          ),
-          if (mechanic != null && activeId != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: MechanicInfoCard(
-                name: mechanic['name']?.toString() ?? 'Mécanicien',
-                phone: mechanic['phone']?.toString(),
-                specialty: mechanic['mechanic_specialty']?.toString(),
-                avatarUrl: mechanic['avatar_url']?.toString(),
-                avatarCacheEpoch: _peerAvatarCacheEpoch,
-                mechanicUser: mechanic,
-                isOnline: userIsOnline(mechanic),
-                onCall: () => launchTelDialer(context, mechanic['phone']?.toString()),
-                onChat: () => _openChat(activeId),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: DashboardSearchBar(
-              controller: _requestSearchCtrl,
-              hintText: 'Véhicule, mécanicien, statut…',
-              loading: _initializing && loading,
-              onChanged: () => setState(() {}),
-            ),
-          ),
-          if (_filteredRequests.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _requestSearchCtrl,
+        builder: (context, _, __) {
+          final filtered = _filteredRequests;
+          final itemCount = headerCount + (filtered.isEmpty ? 1 : filtered.length) + 1;
+
+          return ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            itemCount: itemCount,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Text(
+                    'Mes demandes',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: FeuTheme.charcoal,
+                    ),
+                  ),
+                );
+              }
+              if (index == 1) {
+                if (mechanic == null || activeId == null) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: MechanicInfoCard(
+                    name: mechanic['name']?.toString() ?? 'Mécanicien',
+                    phone: mechanic['phone']?.toString(),
+                    specialty: mechanic['mechanic_specialty']?.toString(),
+                    avatarUrl: mechanic['avatar_url']?.toString(),
+                    avatarCacheEpoch: _peerAvatarCacheEpoch,
+                    mechanicUser: mechanic,
+                    isOnline: userIsOnline(mechanic),
+                    onCall: () => launchTelDialer(context, mechanic['phone']?.toString()),
+                    onChat: () => _openChat(activeId),
+                  ),
+                );
+              }
+              if (index == 2) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: DashboardSearchBar(
+                    controller: _requestSearchCtrl,
+                    hintText: 'Véhicule, mécanicien, statut…',
+                    loading: _initializing && loading,
+                    onChanged: () {},
+                  ),
+                );
+              }
+              if (filtered.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade400),
+                      const SizedBox(height: 12),
+                      Text(
+                        requests.isEmpty ? 'Aucune demande pour le moment' : 'Aucun résultat',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        requests.isEmpty
+                            ? 'Envoie une demande depuis l’onglet Carte.'
+                            : 'Modifie la recherche.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              if (index == itemCount - 1) {
+                return const SizedBox(height: 24);
+              }
+              final r = Map<String, dynamic>.from(filtered[index - headerCount] as Map);
+              final id = ApiService.parseIntId(r['id']);
+              final status = r['status']?.toString();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade400),
-                  const SizedBox(height: 12),
-                  Text(
-                    requests.isEmpty ? 'Aucune demande pour le moment' : 'Aucun résultat',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                    textAlign: TextAlign.center,
+                  RequestListTile(
+                    mechanicName: _mechanicNameFromRequest(r),
+                    vehicleType: r['vehicle_type']?.toString() ?? '—',
+                    preview: r['description']?.toString() ?? '—',
+                    statusLine: _requestStatusLine(r),
+                    statusColor: _requestStatusColor(status),
+                    timeLabel: _requestTimeLabel(r),
+                    onTap: () => _showRequestDetail(r),
+                    trailing: _buildRequestListTrailing(r, id),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    requests.isEmpty
-                        ? 'Envoie une demande depuis l’onglet Carte.'
-                        : 'Modifie la recherche.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-                  ),
+                  Divider(height: 1, indent: 72, color: Colors.grey.shade200),
                 ],
-              ),
-            ),
-          ..._filteredRequests.map((raw) {
-            final r = Map<String, dynamic>.from(raw as Map);
-            final id = ApiService.parseIntId(r['id']);
-            final status = r['status']?.toString();
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RequestListTile(
-                  mechanicName: _mechanicNameFromRequest(r),
-                  vehicleType: r['vehicle_type']?.toString() ?? '—',
-                  preview: r['description']?.toString() ?? '—',
-                  statusLine: _requestStatusLine(r),
-                  statusColor: _requestStatusColor(status),
-                  timeLabel: _requestTimeLabel(r),
-                  onTap: () => _showRequestDetail(r),
-                  trailing: _buildRequestListTrailing(r, id),
-                ),
-                Divider(height: 1, indent: 72, color: Colors.grey.shade200),
-              ],
-            );
-          }),
-          const SizedBox(height: 24),
-        ],
+              );
+            },
+          );
+        },
       ),
     );
   }
