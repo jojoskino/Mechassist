@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// URL de base Laravel **sans** le suffixe `/api` (ex. `http://192.168.1.10:8000`).
-/// L’URL réelle vient de `--dart-define=API_BASE_URL` (scripts `run_*.ps1` / ngrok auto).
+/// L’URL réelle vient de `--dart-define=API_BASE_URL` (scripts `run_*.ps1`, API locale par défaut).
 class ApiConfig {
   ApiConfig._();
+
+  static const String localWebOrigin = 'http://127.0.0.1:8000';
+  static const String localAndroidEmulatorOrigin = 'http://10.0.2.2:8000';
 
   static const String _legacyRenderOrigin = 'https://mechassist-api.onrender.com';
 
@@ -25,7 +28,16 @@ class ApiConfig {
 
   /// Origine affichée / secours après [load].
   static String get productionOrigin =>
-      compiledApiOrigin ?? _override ?? 'http://127.0.0.1:8000';
+      compiledApiOrigin ?? _override ?? localWebOrigin;
+
+  static bool _isTunnelHost(String origin) {
+    try {
+      final host = Uri.parse(origin).host.toLowerCase();
+      return host.contains('ngrok') || host.contains('loca.lt') || host.contains('onrender.com');
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// En-tête requis par ngrok free pour éviter la page d’avertissement navigateur.
   static Map<String, String> ngrokHeadersFor(String origin) {
@@ -45,7 +57,7 @@ class ApiConfig {
     if (raw != null && raw.trim().isNotEmpty && normalized == null) {
       await prefs.remove(_prefsKey);
     }
-    if (normalized == _legacyRenderOrigin) {
+    if (normalized == _legacyRenderOrigin || (normalized != null && _isTunnelHost(normalized))) {
       normalized = null;
       await prefs.remove(_prefsKey);
     }
@@ -72,6 +84,9 @@ class ApiConfig {
     }
 
     if (kIsWeb) {
+      if (_override == null || _isTunnelHost(_override!)) {
+        await setBaseUrlOverride(localWebOrigin);
+      }
       return;
     }
 

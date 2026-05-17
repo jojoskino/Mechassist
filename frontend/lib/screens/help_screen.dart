@@ -68,7 +68,7 @@ class _HelpScreenState extends State<HelpScreen> {
                   ? 'Connexion OK vers ${ApiService.serverOrigin}.'
                   : 'Connexion OK : le téléphone atteint le serveur.')
               : (kIsWeb
-                  ? 'Échec : vérifiez que ngrok et Laravel (port 8000) tournent sur le PC.'
+                  ? 'Échec : vérifiez que Laravel tourne (php artisan serve --host=0.0.0.0 --port=8000).'
                   : 'Échec : vérifie l’URL ci-dessus, le pare-feu Windows et php artisan serve --host=0.0.0.0'),
         ),
         backgroundColor: ok ? Colors.green.shade800 : Colors.red.shade800,
@@ -123,7 +123,7 @@ class _HelpScreenState extends State<HelpScreen> {
       SnackBar(
         content: Text(
           kIsWeb
-              ? 'API tunnel rétablie.'
+              ? 'API locale rétablie.'
               : 'URL par défaut rétablie (émulateur / machine locale).',
         ),
       ),
@@ -156,8 +156,8 @@ class _HelpScreenState extends State<HelpScreen> {
                     const SizedBox(height: 6),
                     Text(
                       kIsWeb
-                          ? 'URL actuelle (ngrok auto via run_web.ps1) :\n${ApiService.serverOrigin}\n\n'
-                              'Lance l’app avec .\\run_web.ps1 : ngrok et l’URL sont configurés automatiquement.'
+                          ? 'URL actuelle (local via run_web.ps1) :\n${ApiService.serverOrigin}\n\n'
+                              'PostgreSQL et Laravel tournent sur ce PC. Lance avec .\\run_web.ps1.'
                           : 'Sur un vrai téléphone, l’émulateur par défaut (10.0.2.2) ne marche pas. '
                               'Mets l’IP LAN de ton PC, ex. http://192.168.1.5:8000 puis Enregistrer.\n\n'
                               'Ne mets jamais 0.0.0.0 dans l’app.',

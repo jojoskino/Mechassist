@@ -1,8 +1,9 @@
-# Prepare Gradle puis lance Android avec URL API ngrok auto.
+# Prepare Gradle puis lance Android (emulateur -> 10.0.2.2:8000).
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+$env:MECHASSIST_API_TARGET = "android"
 $repoRoot = Split-Path $PSScriptRoot
 . (Join-Path $repoRoot "scripts\mechassist-api-url.ps1") | Out-Null
 $apiUrl = $env:API_BASE_URL

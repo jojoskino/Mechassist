@@ -1,8 +1,9 @@
-# MechAssist — Web (navigateur). Démarre ngrok si besoin et injecte l’URL API automatiquement.
+# MechAssist — Web (navigateur). API locale http://127.0.0.1:8000 + PostgreSQL sur le PC.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+$env:MECHASSIST_API_TARGET = "web"
 $repoRoot = Split-Path $PSScriptRoot
 . (Join-Path $repoRoot "scripts\mechassist-api-url.ps1") | Out-Null
 $apiUrl = $env:API_BASE_URL

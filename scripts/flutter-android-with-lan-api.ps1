@@ -19,8 +19,9 @@ $frontend = (Resolve-Path (Join-Path $PSScriptRoot "..\frontend")).Path
 if ($ApiBaseUrl -and $ApiBaseUrl.Trim().Length -gt 0) {
     $base = $ApiBaseUrl.Trim().TrimEnd('/')
 } else {
-    . (Join-Path $PSScriptRoot "resolve-ngrok-api-url.ps1")
-    $base = Resolve-MechassistApiUrl -TargetPort $Port
+    . (Join-Path $PSScriptRoot "start-backend.ps1")
+    . (Join-Path $PSScriptRoot "resolve-local-api-url.ps1")
+    $base = Resolve-LocalApiUrl -Mode "lan" -BackendPort $Port
 }
 
 $define = "API_BASE_URL=$base"
