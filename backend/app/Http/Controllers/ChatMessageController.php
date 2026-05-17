@@ -24,17 +24,22 @@ class ChatMessageController extends Controller
 
         $userId = $request->user()->id;
 
-        ChatMessage::query()
-            ->where('intervention_request_id', $row->id)
-            ->where('user_id', '!=', $userId)
-            ->whereNull('read_at')
-            ->update(['read_at' => now()]);
+        if ($request->boolean('mark_read')) {
+            ChatMessage::query()
+                ->where('intervention_request_id', $row->id)
+                ->where('user_id', '!=', $userId)
+                ->whereNull('read_at')
+                ->update(['read_at' => now()]);
+        }
 
         $messages = ChatMessage::query()
             ->with('user:id,name,role')
             ->where('intervention_request_id', $row->id)
-            ->orderBy('id')
-            ->get();
+            ->orderByDesc('id')
+            ->limit(120)
+            ->get()
+            ->reverse()
+            ->values();
 
         return response()->json($messages);
     }

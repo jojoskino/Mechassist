@@ -18,7 +18,9 @@ class PresenceController extends Controller
         $user->save();
 
         $fresh = $user->fresh();
-        $firestore->syncMechanicPresence($fresh);
+        dispatch(function () use ($firestore, $fresh): void {
+            $firestore->syncMechanicPresence($fresh);
+        })->afterResponse();
 
         return response()->json([
             'ok' => true,

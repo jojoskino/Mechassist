@@ -27,6 +27,10 @@ class MechanicSearchController extends Controller
 
         $onlineBefore = now()->subMinutes(5);
 
+        // Pré-filtre SQL (bounding box) avant le calcul Haversine — beaucoup plus rapide.
+        $latDelta = $radius / 111.0;
+        $lngDelta = $radius / max(0.2, cos(deg2rad($lat)) * 111.0);
+
         $mechanics = User::query()
             ->where('role', 'mecanicien')
             ->where('is_available', true)
@@ -36,6 +40,8 @@ class MechanicSearchController extends Controller
             })
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->whereBetween('latitude', [$lat - $latDelta, $lat + $latDelta])
+            ->whereBetween('longitude', [$lng - $lngDelta, $lng + $lngDelta])
             ->where(function ($q) use ($onlineBefore) {
                 $q->where(function ($q2) use ($onlineBefore) {
                     $q2->whereNotNull('last_seen_at')
@@ -83,7 +89,7 @@ class MechanicSearchController extends Controller
             })->values();
         }
 
-        return response()->json($withDistance);
+        return response()->json($withDistance->take(40)->values());
     }
 
     public static function haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float

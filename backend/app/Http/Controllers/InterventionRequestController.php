@@ -46,7 +46,7 @@ class InterventionRequestController extends Controller
             $q->where('status', $validated['status']);
         }
 
-        $items = $q->orderByDesc('id')->get()->map(fn ($r) => $this->transform($r));
+        $items = $q->orderByDesc('id')->limit(60)->get()->map(fn ($r) => $this->transform($r));
 
         return response()->json($items);
     }
