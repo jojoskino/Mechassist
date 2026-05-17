@@ -169,6 +169,7 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
 
     return Stack(
       children: [
+        // PERF: RepaintBoundary — la carte ne repaint pas avec le sheet.
         Positioned.fill(child: RepaintBoundary(child: widget.map)),
         Positioned(
           top: 0,

@@ -89,6 +89,7 @@ class _MechanicNearbyMapState extends State<MechanicNearbyMap> {
   @override
   Widget build(BuildContext context) {
     final key = widget.googleMapsWebApiKey?.trim() ?? '';
+    // PERF: Web — tuiles Carto (léger) ; Google Maps JS = phase suivante (deferred import).
     if (kIsWeb) {
       return _buildFlutterMap();
     }
