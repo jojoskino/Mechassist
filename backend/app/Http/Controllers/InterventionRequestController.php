@@ -289,16 +289,21 @@ class InterventionRequestController extends Controller
         $row->save();
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
 
-        $this->fcmService->sendToToken(
-            $row->client?->fcm_token,
-            'Demande acceptee',
-            'Votre demande a ete acceptee par le mecanicien.',
-            ['type' => 'request_accepted', 'request_id' => (string) $row->id]
-        );
+        $payload = $this->transform($row);
+        $clientToken = $row->client?->fcm_token;
+        $requestId = $row->id;
 
-        $this->firestoreSync->syncInterventionRequest($row->fresh());
+        dispatch(function () use ($clientToken, $requestId, $row): void {
+            app(FcmService::class)->sendToToken(
+                $clientToken,
+                'Demande acceptée',
+                'Votre demande a été acceptée par le mécanicien.',
+                ['type' => 'request_accepted', 'request_id' => (string) $requestId]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row->fresh());
+        })->afterResponse();
 
-        return response()->json($this->transform($row));
+        return response()->json($payload);
     }
 
     public function decline(Request $request, int $id)
@@ -320,16 +325,21 @@ class InterventionRequestController extends Controller
         $row->save();
         $row->load(['client:id,name,phone', 'mechanic:id,name,phone']);
 
-        $this->fcmService->sendToToken(
-            $row->client?->fcm_token,
-            'Demande refusee',
-            'Le mecanicien a refuse cette demande.',
-            ['type' => 'request_declined', 'request_id' => (string) $row->id]
-        );
+        $payload = $this->transform($row);
+        $clientToken = $row->client?->fcm_token;
+        $requestId = $row->id;
 
-        $this->firestoreSync->syncInterventionRequest($row->fresh());
+        dispatch(function () use ($clientToken, $requestId, $row): void {
+            app(FcmService::class)->sendToToken(
+                $clientToken,
+                'Demande refusée',
+                'Le mécanicien a refusé cette demande.',
+                ['type' => 'request_declined', 'request_id' => (string) $requestId]
+            );
+            app(FirestoreSyncService::class)->syncInterventionRequest($row->fresh());
+        })->afterResponse();
 
-        return response()->json($this->transform($row));
+        return response()->json($payload);
     }
 
     /**

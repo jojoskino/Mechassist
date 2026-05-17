@@ -120,6 +120,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _liveSyncDebounce = Timer(const Duration(milliseconds: 300), () {
       if (!mounted) return;
       unawaited(_refreshRequestsOnly(forceNetwork: true));
+      final accepted = _activeAcceptedRequest();
+      if (accepted != null && _tabIndex != 2) {
+        setState(() => _tabIndex = 2);
+      }
     });
   }
 

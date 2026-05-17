@@ -334,6 +334,26 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     return requests.where((raw) => (raw is Map ? raw['status'] : null)?.toString() == 'pending').length;
   }
 
+  int get _acceptedCount {
+    return requests.where((raw) => (raw is Map ? raw['status'] : null)?.toString() == 'accepted').length;
+  }
+
+  /// Demandes encore en cours (carte + compteurs).
+  List<dynamic> get _activeRequests {
+    return requests.where((raw) {
+      final s = (raw is Map ? raw['status'] : null)?.toString();
+      return s == 'pending' || s == 'accepted';
+    }).toList();
+  }
+
+  List<dynamic> get _requestsForStatusFilter {
+    if (_requestStatusFilter == null) return requests;
+    return requests.where((raw) {
+      final s = (raw is Map ? raw['status'] : null)?.toString();
+      return s == _requestStatusFilter;
+    }).toList();
+  }
+
   int get _completedThisMonth {
     final now = DateTime.now();
     return requests.where((raw) {
@@ -359,7 +379,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   List<dynamic> get _filteredRequests {
     final q = _requestSearchCtrl.text;
-    return requests.where((raw) {
+    return _requestsForStatusFilter.where((raw) {
       final r = raw is Map<String, dynamic>
           ? Map<String, dynamic>.from(raw)
           : Map<String, dynamic>.from(raw as Map);
@@ -379,7 +399,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   List<MapJobSite> _jobSitesForMap() {
     final sites = <MapJobSite>[];
     final seen = <String>{};
-    for (final raw in requests) {
+    for (final raw in _activeRequests) {
       final r = raw is Map<String, dynamic>
           ? Map<String, dynamic>.from(raw)
           : Map<String, dynamic>.from(raw as Map);
@@ -463,11 +483,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       final token = await AuthStorage.getToken();
       if (token == null) return;
       _lastRequestsFetch = DateTime.now();
-      final reqs = await ApiService.listRequests(
-        token,
-        status: _requestStatusFilter,
-        force: forceNetwork,
-      );
+      final reqs = await ApiService.listRequests(token, force: forceNetwork);
       if (!mounted) return;
       final rs = reqs['status'] as int?;
       if (rs != null && rs >= 200 && rs < 300 && reqs['data'] is List) {
@@ -510,7 +526,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     try {
       final results = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token, status: _requestStatusFilter, force: true),
+        ApiService.listRequests(token, force: true),
       ]);
       final me = results[0] as Map<String, dynamic>;
       final reqs = results[1] as Map<String, dynamic>;
@@ -632,7 +648,15 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       await _refreshRequestsOnly(silent: true, forceNetwork: true);
       return;
     }
-    unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
+    if (accept) {
+      setState(() => _requestStatusFilter = 'accepted');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Demande acceptée — client visible sur la carte.')),
+      );
+    } else {
+      setState(() => _requestStatusFilter = null);
+    }
+    await _refreshRequestsOnly(silent: true, forceNetwork: true);
     if (!accept || !mounted) return;
 
     final clat = (request['client_lat'] as num?)?.toDouble();
@@ -807,7 +831,10 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
         bottomNavigationBar: MechAssistBottomNav(
           variant: MechAssistNavVariant.mechanic,
           currentIndex: _tabIndex,
-          badges: {0: _pendingIncomingCount},
+          badges: {
+            if (_pendingIncomingCount + _acceptedCount > 0)
+              0: _pendingIncomingCount + _acceptedCount,
+          },
           onTap: (i) => setState(() => _tabIndex = i),
         ),
       ),
@@ -827,10 +854,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
         MapsFilterChip(
           label: e.$2,
           selected: _requestStatusFilter == e.$1,
-          onTap: () {
-            setState(() => _requestStatusFilter = e.$1);
-            unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
-          },
+          onTap: () => setState(() => _requestStatusFilter = e.$1),
         ),
     ];
   }
@@ -1193,7 +1217,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       filterChips: _mechanicFilterChips(),
       onMenuTap: _openDrawer,
       sheetTitle: 'Zone d\'intervention',
-      sheetSubtitle: lat != null ? '${_jobSitesForMap().length} client(s) · 5 km de rayon' : 'GPS requis',
+      sheetSubtitle: lat != null
+          ? '${_activeRequests.length} intervention(s) active(s) · ${_jobSitesForMap().length} sur la carte'
+          : 'GPS requis',
       subtitleAccent: available && lat != null,
       onSheetRefresh: _refresh,
       sheetHeaderExtra: MechanicStatsHeader(
@@ -1218,7 +1244,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'GPS actif · ${_jobSitesForMap().length} client(s) sur la carte',
+                      'GPS actif · ${_activeRequests.length} intervention(s) · ${_jobSitesForMap().length} point(s) carte',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                     ),
                   ),
@@ -1231,7 +1257,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
               child: Text(
                 requests.isEmpty
                     ? 'Aucune demande. Passe en disponible dans Compte.'
-                    : 'Aucun résultat pour ce filtre ou cette recherche.',
+                    : _requestStatusFilter == 'pending' && _acceptedCount > 0
+                        ? 'Aucune en attente. $_acceptedCount acceptée(s) — onglet « Acceptées ».'
+                        : 'Aucun résultat pour ce filtre ou cette recherche.',
                 style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
               ),
             ),
