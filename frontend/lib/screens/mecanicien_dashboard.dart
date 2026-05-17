@@ -13,6 +13,8 @@ import '../services/push_sync.dart';
 import '../screens/full_screen_image_page.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
+import '../utils/gps_position_tracker.dart';
+import '../services/api_keep_alive.dart';
 import '../utils/list_search.dart';
 import '../utils/phone_launch.dart';
 import '../widgets/intervention_locations_map.dart';
@@ -69,6 +71,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   String? _googleMapsWebKey;
   final TextEditingController _requestSearchCtrl = TextEditingController();
   final _refreshCoordinator = RefreshCoordinator();
+  // PERF: GPS carte isolé — debounce + seuil de déplacement.
+  final _gpsTracker = GpsPositionTracker();
+  bool _appInForeground = true;
 
   @override
   void initState() {
@@ -89,11 +94,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   void _scheduleRefreshTimer() {
     _refreshTimer?.cancel();
-    final hasWork = _activeRequests.isNotEmpty;
-    final interval = hasWork
-        ? const Duration(seconds: 4)
-        : (available ? const Duration(seconds: 8) : const Duration(seconds: 20));
-    _refreshTimer = Timer.periodic(interval, (_) => _onPeriodicRefresh());
+    // PERF: 30 s minimum au premier plan ; arrêt en arrière-plan.
+    if (!_appInForeground) return;
+    _refreshTimer = Timer.periodic(perfDashboardPollInterval, (_) => _onPeriodicRefresh());
   }
 
   void _schedulePresenceTimer() {
@@ -103,7 +106,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _onPeriodicRefresh() {
-    if (!mounted) return;
+    if (!mounted || !_appInForeground) return;
     unawaited(_refreshRequestsOnly(silent: true));
   }
 
@@ -118,8 +121,18 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(ApiService.warmServer(wait: false));
-      unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
+      _appInForeground = true;
+      ApiKeepAlive.instance.warmIfCold();
+      _scheduleRefreshTimer();
+      unawaited(_refreshRequestsOnly(
+        silent: true,
+        forceNetwork: !ApiService.isServerWarm,
+      ));
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _appInForeground = false;
+      _refreshTimer?.cancel();
     }
   }
 
@@ -201,13 +214,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     setState(() => _googleMapsWebKey = ClientConfigCache.googleMapsWebKey());
   }
 
-  void _applyCoords(double latitude, double longitude) {
-    if (!mounted) return;
-    setState(() {
-      lat = latitude;
-      lng = longitude;
-      _locationReady = true;
-    });
+  void _applyCoords(double latitude, double longitude, {bool notifyMap = true}) {
+    lat = latitude;
+    lng = longitude;
+    _locationReady = true;
+    if (notifyMap) {
+      _gpsTracker.emitImmediate(latitude, longitude);
+    }
   }
 
   Future<void> _bootstrapLocation() async {
@@ -220,6 +233,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       if (last != null) {
         _applyCoords(last.latitude, last.longitude);
         await _pushLocation(last.latitude, last.longitude, force: true);
+        if (mounted) setState(() {});
       }
     } catch (_) {}
     try {
@@ -231,16 +245,19 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       );
       _applyCoords(pos.latitude, pos.longitude);
       await _pushLocation(pos.latitude, pos.longitude, force: true);
+      if (mounted) setState(() {});
     } catch (_) {}
 
-    final settings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: kIsWeb ? 0 : 12,
-    );
+    final settings = perfLocationStreamSettings();
     _positionSub = Geolocator.getPositionStream(locationSettings: settings).listen(
       (pos) {
-        _applyCoords(pos.latitude, pos.longitude);
-        _pushLocation(pos.latitude, pos.longitude);
+        _gpsTracker.handlePosition(
+          pos,
+          onSignificant: (plat, plng) {
+            _applyCoords(plat, plng, notifyMap: true);
+            _pushLocation(plat, plng);
+          },
+        );
       },
       onError: (_) {},
     );
@@ -328,6 +345,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     _presenceTimer?.cancel();
     _liveSyncDebounce?.cancel();
     _positionSub?.cancel();
+    _gpsTracker.dispose();
     _requestSearchCtrl.dispose();
     super.dispose();
   }
@@ -533,7 +551,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       }
       final results = await Future.wait<dynamic>([
         refreshProfile ? ApiService.getMe(token) : Future<Map<String, dynamic>>.value({}),
-        ApiService.listRequests(token, force: true),
+        // PERF: Utiliser le cache API sauf refresh explicite non silencieux.
+        ApiService.listRequests(token, force: !silent),
       ]);
       final me = results[0] as Map<String, dynamic>;
       final reqs = results[1] as Map<String, dynamic>;
