@@ -27,15 +27,28 @@ function Test-ArgsWebBrowserDevice {
     return $false
 }
 
-# Sans -d : Web local (evite menu + Edge qui ouvre 4 onglets).
-if (-not (Test-ArgsSpecifyDevice -Args $FlutterArgs)) {
+function Test-ArgsBareFlutterRun {
+    param([string[]]$Args)
+    if ($Args.Count -eq 0) { return $true }
+    $webFlags = @('--web-port', '--web-hostname', '-d', 'web-server', 'chrome', 'edge')
+    foreach ($a in $Args) {
+        if ($a -match '^--web-port') { return $true }
+        if ($a -eq '-d' -or $a -in @('web-server', 'chrome', 'edge')) { return $true }
+    }
+    return $false
+}
+
+# Web (defaut ou chrome/edge/web-server) : toujours run_web.ps1 (arrete l'ancien, port 53100).
+if (-not (Test-ArgsSpecifyDevice -Args $FlutterArgs) -or (Test-ArgsWebBrowserDevice -Args $FlutterArgs)) {
+    if (Test-ArgsWebBrowserDevice -Args $FlutterArgs) {
+        Write-Host "Navigateur auto Flutter -> web-server (port 53100, relance propre)." -ForegroundColor Yellow
+    }
     & "$PSScriptRoot\run_web.ps1"
     exit $LASTEXITCODE
 }
 
-# chrome / edge / web-server : toujours via run_web.ps1 (port fixe, 1 onglet).
-if (Test-ArgsWebBrowserDevice -Args $FlutterArgs) {
-    Write-Host "Navigateur auto Flutter desactive -> web-server (1 onglet, port 53100)." -ForegroundColor Yellow
+# "flutter run" avec flags web mais sans -d explicite
+if (Test-ArgsBareFlutterRun -Args $FlutterArgs) {
     & "$PSScriptRoot\run_web.ps1"
     exit $LASTEXITCODE
 }

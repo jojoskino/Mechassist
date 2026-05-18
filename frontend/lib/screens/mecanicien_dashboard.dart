@@ -26,7 +26,6 @@ import '../widgets/public_network_image.dart';
 import '../screens/trip_navigation_screen.dart';
 import '../screens/user_profile_page.dart';
 import '../widgets/user_avatar.dart';
-import '../utils/profile_navigation.dart';
 import '../services/app_notification_hub.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
@@ -1235,28 +1234,6 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       onRecenter: _refreshGpsNow,
       onPrimaryFab: _refresh,
       primaryFabIcon: Icons.refresh_rounded,
-      profileInitial: currentName,
-      profileAvatarUrl: _myAvatarUrl,
-      profileAvatarCacheEpoch: _myAvatarCacheEpoch,
-      onProfileTap: () async {
-        final result = await Navigator.pushNamed(context, '/profile');
-        if (!mounted) return;
-        final parsed = ProfileNavigationResult.fromDynamic(result);
-        if (parsed != null) {
-          setState(() {
-            if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
-              _myAvatarUrl = parsed.avatarUrl;
-              _myAvatarCacheEpoch = parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
-            }
-            _tabIndex = 2;
-          });
-          if (parsed.updated) {
-            await _refresh(silent: true);
-          }
-        } else {
-          setState(() => _tabIndex = 2);
-        }
-      },
       filterChips: _mechanicFilterChips(),
       onMenuTap: _openDrawer,
       sheetTitle: 'Zone d\'intervention',

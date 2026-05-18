@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
-import 'user_avatar.dart';
 
 /// Écran type Google Maps : carte plein écran, barre de recherche, puces, FAB, bottom sheet.
 class MapsDiscoveryShell extends StatefulWidget {
@@ -13,16 +12,14 @@ class MapsDiscoveryShell extends StatefulWidget {
     required this.sheetTitle,
     required this.buildSheetBody,
     this.searchController,
-    this.searchHint = 'Mécaniciens, spécialité…',
+    this.searchHint = 'Rechercher…',
     this.onSearch,
     this.filterChips = const [],
+    this.onFilterTap,
+    this.filtersActive = false,
     this.sheetSubtitle,
     this.subtitleAccent = false,
     this.onRecenter,
-    this.onProfileTap,
-    this.profileInitial,
-    this.profileAvatarUrl,
-    this.profileAvatarCacheEpoch,
     this.topBanner,
     this.onSheetRefresh,
     this.initialSheetFraction = 0.38,
@@ -45,11 +42,9 @@ class MapsDiscoveryShell extends StatefulWidget {
   final String searchHint;
   final VoidCallback? onSearch;
   final List<Widget> filterChips;
+  final VoidCallback? onFilterTap;
+  final bool filtersActive;
   final VoidCallback? onRecenter;
-  final VoidCallback? onProfileTap;
-  final String? profileInitial;
-  final String? profileAvatarUrl;
-  final int? profileAvatarCacheEpoch;
   final Widget? topBanner;
   final Future<void> Function()? onSheetRefresh;
   final bool subtitleAccent;
@@ -178,56 +173,47 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: topPad + 6),
-              if (widget.onMenuTap != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                  child: Row(
-                    children: [
+              SizedBox(height: topPad + 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (widget.onMenuTap != null)
                       IconButton(
                         onPressed: widget.onMenuTap,
-                        icon: const Icon(Icons.menu_rounded, color: FeuTheme.deepBlue, size: 28),
+                        tooltip: 'Menu',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                        icon: const Icon(Icons.menu_rounded, color: FeuTheme.deepBlue, size: 26),
                       ),
-                      Text(
-                        'MechAssist',
-                        style: AppFonts.style(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                          color: FeuTheme.deepBlue,
-                        ),
+                    if (widget.onMenuTap != null) const SizedBox(width: 6),
+                    Expanded(
+                      child: _MapsSearchBar(
+                        controller: widget.searchController,
+                        hint: widget.searchHint,
+                        onSubmitted: widget.onSearch,
+                        onChanged: widget.onSearch,
+                        showGpsIcon: widget.searchHintGps,
+                        onFilterTap: widget.onFilterTap,
+                        filtersActive: widget.filtersActive,
                       ),
-                      const Spacer(),
-                      if (widget.onProfileTap != null)
-                        UserAvatar(
-                          name: widget.profileInitial ?? 'M',
-                          avatarUrl: widget.profileAvatarUrl,
-                          cacheEpoch: widget.profileAvatarCacheEpoch,
-                          radius: 20,
-                          onTap: widget.onProfileTap,
-                        ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              _MapsSearchBar(
-                controller: widget.searchController,
-                hint: widget.searchHint,
-                onSubmitted: widget.onSearch,
-                onChanged: widget.onSearch,
-                onProfileTap: widget.onMenuTap != null ? null : widget.onProfileTap,
-                profileInitial: widget.profileInitial,
-                profileAvatarUrl: widget.profileAvatarUrl,
-                profileAvatarCacheEpoch: widget.profileAvatarCacheEpoch,
-                showGpsIcon: widget.searchHintGps,
               ),
               if (widget.filterChips.isNotEmpty)
-                SizedBox(
-                  height: 44,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                    itemCount: widget.filterChips.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (_, i) => widget.filterChips[i],
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: SizedBox(
+                    height: 40,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      itemCount: widget.filterChips.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) => widget.filterChips[i],
+                    ),
                   ),
                 ),
               if (widget.topBanner != null)
@@ -430,79 +416,73 @@ class _MapsSearchBar extends StatelessWidget {
     required this.hint,
     this.onSubmitted,
     this.onChanged,
-    this.onProfileTap,
-    this.profileInitial,
-    this.profileAvatarUrl,
-    this.profileAvatarCacheEpoch,
     this.showGpsIcon = false,
+    this.onFilterTap,
+    this.filtersActive = false,
   });
 
   final TextEditingController? controller;
   final String hint;
   final VoidCallback? onSubmitted;
   final VoidCallback? onChanged;
-  final VoidCallback? onProfileTap;
-  final String? profileInitial;
-  final String? profileAvatarUrl;
-  final int? profileAvatarCacheEpoch;
   final bool showGpsIcon;
+  final VoidCallback? onFilterTap;
+  final bool filtersActive;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
         boxShadow: [
           BoxShadow(
-            color: FeuTheme.charcoal.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
+            color: FeuTheme.charcoal.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              textInputAction: TextInputAction.search,
-              onChanged: onChanged == null ? null : (_) => onChanged!(),
-              onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
-              style: AppFonts.style(fontSize: 15),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: AppFonts.style(color: Colors.grey.shade600, fontSize: 15),
-                prefixIcon: Icon(
-                  Icons.search_rounded,
-                  color: FeuTheme.deepBlue.withValues(alpha: 0.75),
-                  size: 22,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  textInputAction: TextInputAction.search,
+                  onChanged: onChanged == null ? null : (_) => onChanged!(),
+                  onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+                  style: AppFonts.style(fontSize: 15, fontWeight: FontWeight.w500),
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    hintStyle: AppFonts.style(color: Colors.grey.shade500, fontSize: 15),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: FeuTheme.deepBlue.withValues(alpha: 0.65),
+                      size: 22,
+                    ),
+                    suffixIcon: showGpsIcon
+                        ? Icon(Icons.near_me_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.5), size: 20)
+                        : null,
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                 ),
-                suffixIcon: showGpsIcon
-                    ? Icon(Icons.gps_fixed_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.55), size: 20)
-                    : null,
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
               ),
-            ),
+              if (onFilterTap != null)
+                IconButton(
+                  onPressed: onFilterTap,
+                  tooltip: 'Filtres',
+                  icon: Icon(
+                    Icons.tune_rounded,
+                    color: filtersActive ? FeuTheme.ember : FeuTheme.deepBlue.withValues(alpha: 0.7),
+                    size: 22,
+                  ),
+                ),
+              const SizedBox(width: 4),
+            ],
           ),
-          if (onProfileTap != null) ...[
-            const SizedBox(width: 4),
-            UserAvatar(
-              name: profileInitial ?? 'M',
-              avatarUrl: profileAvatarUrl,
-              cacheEpoch: profileAvatarCacheEpoch,
-              radius: 20,
-              onTap: onProfileTap,
-            ),
-            const SizedBox(width: 8),
-          ] else
-            const SizedBox(width: 12),
-        ],
-      ),
     );
   }
 }

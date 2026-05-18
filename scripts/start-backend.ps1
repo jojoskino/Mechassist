@@ -19,7 +19,23 @@ function Test-PortListening([int]$p) {
 
 if (Test-PortListening $Port) {
     Write-Host "Laravel deja actif sur le port $Port." -ForegroundColor DarkGray
+    Write-Host "Si les donnees ne s'enregistrent pas, redemarrez Laravel (Ctrl+C puis relancez) apres modification du .env." -ForegroundColor DarkGray
     return
+}
+
+Push-Location $backend
+try {
+    $dbCheck = & php artisan db:show 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERREUR PostgreSQL / fichier .env invalide :" -ForegroundColor Red
+        Write-Host $dbCheck
+        Write-Host "Verifiez backend\.env (chaque commentaire doit commencer par #)." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "PostgreSQL OK ($((($dbCheck | Select-String 'Database').ToString() -replace '.*\.\s+','').Trim()))" -ForegroundColor DarkGray
+}
+finally {
+    Pop-Location
 }
 
 Write-Host "Demarrage Laravel (port $Port)..." -ForegroundColor Cyan
@@ -37,7 +53,7 @@ try {
         }
         Start-Sleep -Milliseconds 400
     }
-    Write-Host "Laravel demarre lentement — verifiez la fenetre php artisan serve." -ForegroundColor Yellow
+    Write-Host "Laravel demarre lentement - verifiez la fenetre php artisan serve." -ForegroundColor Yellow
 }
 finally {
     Pop-Location

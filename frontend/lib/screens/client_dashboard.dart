@@ -14,6 +14,7 @@ import '../services/app_notification_hub.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
 import '../services/push_sync.dart';
+import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
 import '../utils/gps_helper.dart';
 import '../utils/api_perf.dart';
@@ -1195,27 +1196,39 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         icon: Icons.star_rounded,
         onTap: _cycleMinStars,
       ),
-      MapsFilterChip(
-        label: 'Spécialité',
-        icon: Icons.build_rounded,
-        onTap: () => _showSpecialtyFilterSheet(),
-      ),
     ];
   }
 
-  void _showSpecialtyFilterSheet() {
+  bool get _clientFiltersActive =>
+      _searchRadiusKm != 5 ||
+      _minStarsFilter > 0 ||
+      _specialtyFilterCtrl.text.trim().isNotEmpty;
+
+  void _showClientFiltersSheet() {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 24 + MediaQuery.paddingOf(ctx).bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              'Filtres',
+              style: AppFonts.style(fontSize: 18, fontWeight: FontWeight.w800, color: FeuTheme.charcoal),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _clientFilterChips(),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _specialtyFilterCtrl,
               decoration: const InputDecoration(
@@ -1223,14 +1236,35 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
                 hintText: 'Ex. moteur, pneu…',
               ),
             ),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _refreshAll(silent: true, requireFreshGps: false);
-              },
-              style: FilledButton.styleFrom(backgroundColor: FeuTheme.ember),
-              child: const Text('Appliquer'),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _minStarsFilter = 0;
+                        _specialtyFilterCtrl.clear();
+                        _searchRadiusKm = 5;
+                      });
+                      Navigator.pop(ctx);
+                      _refreshAll(silent: true, requireFreshGps: false);
+                    },
+                    child: const Text('Réinitialiser'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _refreshAll(silent: true, requireFreshGps: false);
+                    },
+                    style: FilledButton.styleFrom(backgroundColor: FeuTheme.ember),
+                    child: const Text('Appliquer'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -1414,33 +1448,16 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       loading: _initializing && loading,
       bottomInset: bottomInset,
       searchController: _mechanicKeywordCtrl,
-      searchHint: searchMode ? 'Où êtes-vous ?' : 'Mécaniciens, spécialité…',
+      searchHint: searchMode ? 'Où êtes-vous ?' : 'Rechercher un mécanicien',
       searchHintGps: searchMode,
       onSearch: () {},
+      onFilterTap: searchMode ? null : _showClientFiltersSheet,
+      filtersActive: searchMode ? false : _clientFiltersActive,
       initialSheetFraction: searchMode ? 0.48 : 0.38,
       onRecenter: _recenterMap,
       onPrimaryFab: () => _refreshAll(silent: true, requireFreshGps: false),
-      profileInitial: currentName,
-      profileAvatarUrl: _myAvatarUrl,
-      profileAvatarCacheEpoch: _myAvatarCacheEpoch,
       onMenuTap: _openDrawer,
-      onProfileTap: () async {
-        final result = await Navigator.pushNamed(context, '/profile');
-        if (!mounted) return;
-        final parsed = ProfileNavigationResult.fromDynamic(result);
-        if (parsed != null) {
-          setState(() {
-            if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
-              _myAvatarUrl = parsed.avatarUrl;
-              _myAvatarCacheEpoch = parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
-            }
-          });
-          if (parsed.updated) {
-            await _refreshAll(silent: true, requireFreshGps: false);
-          }
-        }
-      },
-      filterChips: _clientFilterChips(),
+      filterChips: const [],
       sheetTitle: searchMode ? 'Recherche' : 'Mécaniciens proches',
       sheetSubtitle: _mechanicsSheetSubtitle(searchMode),
       subtitleAccent: !searchMode && _displayMechanics.isNotEmpty,
