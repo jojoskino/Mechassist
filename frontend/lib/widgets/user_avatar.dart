@@ -44,7 +44,12 @@ class UserAvatar extends StatelessWidget {
     final networkUrl = _networkUrl;
     final hasPhoto = hasMemory || (networkUrl != null && networkUrl.isNotEmpty);
 
+    final imageKey = networkUrl != null
+        ? ValueKey<String>('avatar-${networkUrl.hashCode}-${cacheEpoch ?? 0}')
+        : null;
+
     Widget avatar = CircleAvatar(
+      key: imageKey,
       radius: radius,
       backgroundColor: FeuTheme.deepBlue.withValues(alpha: 0.12),
       foregroundColor: FeuTheme.deepBlue,

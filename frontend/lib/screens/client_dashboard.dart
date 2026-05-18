@@ -44,6 +44,7 @@ import '../widgets/rate_mechanic_sheet.dart';
 import '../utils/recent_addresses.dart';
 import '../screens/help_screen.dart';
 import '../screens/full_screen_image_page.dart';
+import '../app_navigator.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key, this.initialTabIndex = 0});
@@ -129,8 +130,26 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   void _onProfilesExternallyUpdated() {
-    if (mounted) setState(() {});
-    unawaited(_refreshRequestsOnly(forceNetwork: true));
+    if (!mounted) return;
+    unawaited(_syncAvatarsAfterProfileChange());
+  }
+
+  Future<void> _syncAvatarsAfterProfileChange() async {
+    final token = await AuthStorage.getToken();
+    if (token == null || !mounted) return;
+    final me = await ApiService.getMe(token, force: true);
+    if (!mounted) return;
+    final ms = me['status'] as int?;
+    if (ms != null && ms >= 200 && ms < 300) {
+      setState(() {
+        _myAvatarUrl = me['avatar_url']?.toString();
+        _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+      });
+    }
+    await _refreshRequestsOnly(forceNetwork: true);
+    if (lat != null && lng != null) {
+      await _fetchNearbyInBackground(token);
+    }
   }
 
   void _onLiveSync() {
@@ -780,8 +799,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
+    final rootNav = Navigator.of(context, rootNavigator: true);
     final go = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         title: const Text('Déconnexion'),
         content: const Text('Es-tu sûr de vouloir te déconnecter ?'),
@@ -796,6 +818,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       ),
     );
     if (go != true || !mounted) return;
+    InAppNotificationSync.instance.stop();
     final token = await AuthStorage.getToken();
     if (token != null) {
       await ApiService.logout(token);
@@ -804,8 +827,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     await AuthStorage.clear();
     await ApiDataCache.clear();
     ApiResponseCache.clear();
-    if (!context.mounted) return;
-    Navigator.pushReplacementNamed(context, '/login');
+    AppNotificationHub.instance.clear();
+    if (!mounted) return;
+    rootNav.pushNamedAndRemoveUntil('/login', (_) => false);
   }
 
   Future<void> _openChat(int requestId) async {
@@ -1568,93 +1592,110 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     return _pickupLabel();
   }
 
+  void _openRequestPhoto(String url, {String? title}) {
+    if (url.trim().isEmpty) return;
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
+    nav.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FullScreenImagePage(imageUrl: url, title: title ?? 'Photo de la panne'),
+      ),
+    );
+  }
+
   void _showRequestDetail(Map<String, dynamic> r) {
+    final navContext = appNavigatorKey.currentContext;
+    if (navContext == null) return;
+
     final id = ApiService.parseIntId(r['id']);
     final rt = r['rating'];
+    final photoUrl = r['photo_url']?.toString().trim();
+    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+    final mechanic = _mechanicFromRequest(r);
+
     showDialog<void>(
-      context: context,
+      context: navContext,
       useRootNavigator: true,
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         title: Text('Demande #${id ?? '—'}'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_mechanicFromRequest(r) != null) ...[
-                MechanicInfoCard(
-                  name: _mechanicNameFromRequest(r),
-                  phone: _mechanicFromRequest(r)!['phone']?.toString(),
-                  specialty: _mechanicFromRequest(r)!['mechanic_specialty']?.toString(),
-                  avatarUrl: _mechanicFromRequest(r)!['avatar_url']?.toString(),
-                  avatarCacheEpoch: _peerAvatarCacheEpoch,
-                  mechanicUser: _mechanicFromRequest(r),
-                  isOnline: userIsOnline(_mechanicFromRequest(r)),
-                  compact: true,
-                  onCall: () => launchTelDialer(context, _mechanicFromRequest(r)!['phone']?.toString()),
-                  onChat: id != null && r['status']?.toString() == 'accepted'
-                      ? () {
-                          Navigator.pop(ctx);
-                          _openChat(id);
-                        }
-                      : null,
-                ),
-                const SizedBox(height: 8),
-              ] else
-                Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (mechanic != null) ...[
+              MechanicInfoCard(
+                name: _mechanicNameFromRequest(r),
+                phone: mechanic['phone']?.toString(),
+                specialty: mechanic['mechanic_specialty']?.toString(),
+                avatarUrl: mechanic['avatar_url']?.toString(),
+                avatarCacheEpoch: _peerAvatarCacheEpoch,
+                mechanicUser: mechanic,
+                isOnline: userIsOnline(mechanic),
+                compact: true,
+                onCall: () => launchTelDialer(navContext, mechanic['phone']?.toString()),
+                onChat: id != null && r['status']?.toString() == 'accepted'
+                    ? () {
+                        Navigator.pop(ctx);
+                        _openChat(id);
+                      }
+                    : null,
+              ),
               const SizedBox(height: 8),
-              Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
+            ] else
+              Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
+            const SizedBox(height: 8),
+            Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
+            const SizedBox(height: 8),
+            Text(_requestStatusLine(r)),
+            if (r['status']?.toString() == 'completed' && r['outcome'] != null) ...[
               const SizedBox(height: 8),
-              Text(_requestStatusLine(r)),
-              if (r['status']?.toString() == 'completed' && r['outcome'] != null) ...[
-                const SizedBox(height: 8),
-                Text('Résultat : ${_outcomeLabelFr(r['outcome'])}'),
-              ],
-              if (rt is Map && rt['stars'] != null) ...[
-                const SizedBox(height: 8),
-                Text('Ta note : ${rt['stars']}/5 ★'),
-                if (rt['comment'] != null && rt['comment'].toString().trim().isNotEmpty)
-                  Text('« ${rt['comment']} »', style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
-              ],
-              const SizedBox(height: 8),
-              Text(r['description']?.toString() ?? ''),
-              if (r['client_address'] != null && r['client_address'].toString().trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text('Repère : ${r['client_address']}', style: TextStyle(color: Colors.grey.shade800, fontSize: 13)),
-              ],
-              if (r['status']?.toString() == 'accepted' && !_mechanicMarkedComplete(r)) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Le mécanicien doit marquer l’intervention comme terminée avant que tu puisses clôturer.',
-                  style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
-                ),
-              ],
-              if (r['photo_url'] != null && r['photo_url'].toString().trim().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    Navigator.of(context, rootNavigator: true).push<void>(
-                      MaterialPageRoute<void>(
-                        builder: (_) => FullScreenImagePage(
-                          imageUrl: r['photo_url'].toString(),
-                          title: 'Photo de la panne',
-                        ),
-                      ),
-                    );
-                  },
-                  child: PublicNetworkImage(
-                    url: r['photo_url'].toString(),
-                    width: double.infinity,
-                    height: 160,
-                    borderRadius: BorderRadius.circular(8),
-                    icon: Icons.broken_image_outlined,
-                  ),
-                ),
-              ],
+              Text('Résultat : ${_outcomeLabelFr(r['outcome'])}'),
             ],
-          ),
+            if (rt is Map && rt['stars'] != null) ...[
+              const SizedBox(height: 8),
+              Text('Ta note : ${rt['stars']}/5 ★'),
+              if (rt['comment'] != null && rt['comment'].toString().trim().isNotEmpty)
+                Text('« ${rt['comment']} »', style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+            ],
+            const SizedBox(height: 8),
+            Text(r['description']?.toString() ?? ''),
+            if (r['client_address'] != null && r['client_address'].toString().trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Repère : ${r['client_address']}', style: TextStyle(color: Colors.grey.shade800, fontSize: 13)),
+            ],
+            if (r['status']?.toString() == 'accepted' && !_mechanicMarkedComplete(r)) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Le mécanicien doit marquer l’intervention comme terminée avant que tu puisses clôturer.',
+                style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
+              ),
+            ],
+            if (hasPhoto) ...[
+              const SizedBox(height: 12),
+              LayoutBuilder(
+                builder: (_, constraints) {
+                  final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                      ? constraints.maxWidth
+                      : 280.0;
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openRequestPhoto(photoUrl);
+                    },
+                    child: PublicNetworkImage(
+                      url: photoUrl,
+                      width: w,
+                      height: 160,
+                      borderRadius: BorderRadius.circular(8),
+                      icon: Icons.broken_image_outlined,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),

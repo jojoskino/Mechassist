@@ -30,9 +30,11 @@ import '../services/app_notification_hub.dart';
 import '../services/in_app_notification_sync.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
+import '../utils/profile_navigation.dart';
 import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
 import '../widgets/mechassist_bottom_nav.dart';
+import '../app_navigator.dart';
 import '../widgets/mechassist_light_app_bar.dart';
 import '../widgets/mechanic_stats_header.dart';
 import '../screens/help_screen.dart';
@@ -329,8 +331,23 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _onProfilesExternallyUpdated() {
-    if (mounted) setState(() {});
-    unawaited(_refreshRequestsOnly(silent: true, forceNetwork: true));
+    if (!mounted) return;
+    unawaited(_syncAvatarsAfterProfileChange());
+  }
+
+  Future<void> _syncAvatarsAfterProfileChange() async {
+    final token = await AuthStorage.getToken();
+    if (token == null || !mounted) return;
+    final me = await ApiService.getMe(token, force: true);
+    if (!mounted) return;
+    final ms = me['status'] as int?;
+    if (ms != null && ms >= 200 && ms < 300) {
+      setState(() {
+        _myAvatarUrl = me['avatar_url']?.toString();
+        _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+      });
+    }
+    await _refreshRequestsOnly(silent: true, forceNetwork: true);
   }
 
   int get _clientAvatarCacheEpoch => Object.hash(_clientAvatarEpoch, ProfileSignals.instance.generation);
@@ -473,8 +490,11 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
+    final rootNav = Navigator.of(context, rootNavigator: true);
     final go = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         title: const Text('Déconnexion'),
         content: const Text('Es-tu sûr de vouloir te déconnecter ?'),
@@ -489,6 +509,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       ),
     );
     if (go != true || !mounted) return;
+    InAppNotificationSync.instance.stop();
     final token = await AuthStorage.getToken();
     if (token != null) {
       await ApiService.logout(token);
@@ -497,8 +518,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     await AuthStorage.clear();
     await ApiDataCache.clear();
     ApiResponseCache.clear();
-    if (!context.mounted) return;
-    Navigator.pushReplacementNamed(context, '/login');
+    AppNotificationHub.instance.clear();
+    if (!mounted) return;
+    rootNav.pushNamedAndRemoveUntil('/login', (_) => false);
   }
 
   Future<void> _refresh({bool silent = false, bool refreshProfile = true}) async {
@@ -834,6 +856,15 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
                     Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const HelpScreen()));
                   },
                 ),
+                const Divider(),
+                ListTile(
+                  leading: Icon(Icons.logout_rounded, color: Colors.red.shade700),
+                  title: Text('Déconnexion', style: TextStyle(color: Colors.red.shade700)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmLogout(context);
+                  },
+                ),
               ],
             ),
           ),
@@ -943,7 +974,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
   void _openRequestPhoto(String url, {String? title}) {
     if (url.trim().isEmpty) return;
-    Navigator.of(context, rootNavigator: true).push<void>(
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
+    nav.push<void>(
       MaterialPageRoute<void>(
         builder: (_) => FullScreenImagePage(imageUrl: url, title: title ?? 'Photo de la panne'),
       ),
@@ -951,10 +984,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _showMechanicRequestDetail(Map<String, dynamic> r) {
+    final navContext = appNavigatorKey.currentContext;
+    if (navContext == null) return;
+
     final status = (r['status'] ?? '').toString().trim();
     final id = ApiService.parseIntId(r['id']);
-    final rawPhoto = r['photo_url']?.toString();
-    final hasPhoto = rawPhoto != null && rawPhoto.trim().isNotEmpty;
+    final rawPhoto = r['photo_url']?.toString().trim();
+    final hasPhoto = rawPhoto != null && rawPhoto.isNotEmpty;
     final client = r['client'];
     String? clientPhone;
     if (client is Map) {
@@ -968,28 +1004,48 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
             r['mechanic_completed_at'].toString() == 'null');
 
     showDialog<void>(
-      context: context,
+      context: navContext,
       useRootNavigator: true,
       barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
-        title: Text('Demande #${id ?? '—'}'),
-        content: SingleChildScrollView(
-          child: Column(
+      builder: (ctx) {
+        return AlertDialog(
+          scrollable: true,
+          title: Text('Demande #${id ?? '—'}'),
+          content: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (client is Map)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: UserAvatar(
-                    name: client['name']?.toString() ?? 'C',
-                    avatarUrl: client['avatar_url']?.toString(),
-                    cacheEpoch: _clientAvatarCacheEpoch,
-                    radius: 24,
-                  ),
-                  title: Text(client['name']?.toString() ?? 'Client'),
-                  subtitle: Text(client['phone']?.toString() ?? ''),
+              if (client is Map) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    UserAvatar(
+                      name: client['name']?.toString() ?? 'C',
+                      avatarUrl: client['avatar_url']?.toString(),
+                      cacheEpoch: _clientAvatarCacheEpoch,
+                      radius: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            client['name']?.toString() ?? 'Client',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                          ),
+                          if (client['phone'] != null && client['phone'].toString().trim().isNotEmpty)
+                            Text(
+                              client['phone'].toString(),
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 12),
+              ],
               Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
               const SizedBox(height: 6),
               Text('Statut : $status'),
@@ -999,18 +1055,25 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
                 const SizedBox(height: 12),
                 Text('Photo de la panne', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
                 const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _openRequestPhoto(rawPhoto);
+                LayoutBuilder(
+                  builder: (layoutCtx, constraints) {
+                    final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                        ? constraints.maxWidth
+                        : 280.0;
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _openRequestPhoto(rawPhoto);
+                      },
+                      child: PublicNetworkImage(
+                        url: rawPhoto,
+                        width: w,
+                        height: 200,
+                        borderRadius: BorderRadius.circular(12),
+                        icon: Icons.broken_image_outlined,
+                      ),
+                    );
                   },
-                  child: PublicNetworkImage(
-                    url: rawPhoto,
-                    width: double.infinity,
-                    height: 200,
-                    borderRadius: BorderRadius.circular(12),
-                    icon: Icons.broken_image_outlined,
-                  ),
                 ),
                 TextButton.icon(
                   onPressed: () {
@@ -1023,44 +1086,44 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
               ],
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
-          if (canDial && (status == 'pending' || status == 'accepted'))
-            TextButton.icon(
-              onPressed: () {
-                Navigator.pop(ctx);
-                launchTelDialer(context, clientPhone);
-              },
-              icon: const Icon(Icons.call_rounded),
-              label: const Text('Appeler'),
-            ),
-          if (canAct && id != null)
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _processRequest(id, true, r);
-              },
-              child: const Text('Accepter'),
-            ),
-          if (status == 'accepted' && id != null)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _openChat(id);
-              },
-              child: const Text('Chat'),
-            ),
-          if (canMarkDone && id != null)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _markMechanicComplete(id);
-              },
-              child: const Text('Terminée'),
-            ),
-        ],
-      ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
+            if (canDial && (status == 'pending' || status == 'accepted'))
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  launchTelDialer(navContext, clientPhone);
+                },
+                icon: const Icon(Icons.call_rounded),
+                label: const Text('Appeler'),
+              ),
+            if (canAct && id != null)
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _processRequest(id, true, r);
+                },
+                child: const Text('Accepter'),
+              ),
+            if (status == 'accepted' && id != null)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _openChat(id);
+                },
+                child: const Text('Chat'),
+              ),
+            if (canMarkDone && id != null)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _markMechanicComplete(id);
+                },
+                child: const Text('Terminée'),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -1365,10 +1428,18 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
           title: const Text('Mon profil'),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () async {
-            final changed = await Navigator.pushNamed(context, '/profile');
+            final result = await Navigator.pushNamed(context, '/profile');
             if (!mounted) return;
-            if (changed == true) {
-              await _refresh(silent: true);
+            final parsed = ProfileNavigationResult.fromDynamic(result);
+            if (parsed != null) {
+              setState(() {
+                if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
+                  _myAvatarUrl = parsed.avatarUrl;
+                  _myAvatarCacheEpoch =
+                      parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
+                }
+              });
+              if (parsed.updated) await _refresh(silent: true);
             }
           },
         ),

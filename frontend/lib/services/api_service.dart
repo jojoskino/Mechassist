@@ -785,7 +785,13 @@ class ApiService {
       _applyTunnelHeaders(request);
       request.files.add(http.MultipartFile.fromBytes('avatar', bytes, filename: filename));
       final response = await _twMultipart(request);
-      return _parseBody(response);
+      final body = _parseBody(response);
+      final st = body['status'] as int?;
+      if (st != null && st >= 200 && st < 300) {
+        ApiResponseCache.invalidateMe();
+        ApiResponseCache.invalidateRequestLists();
+      }
+      return body;
     } catch (e) {
       return _networkFailure(e);
     }

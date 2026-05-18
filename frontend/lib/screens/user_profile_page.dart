@@ -5,6 +5,7 @@ import '../theme/feu_theme.dart';
 import '../utils/online_status.dart';
 import '../utils/phone_launch.dart';
 import '../widgets/user_avatar.dart';
+import '../services/profile_signals.dart';
 import 'full_screen_image_page.dart';
 
 /// Fiche contact (style messagerie) — mécanicien ou client.
@@ -48,6 +49,7 @@ class UserProfilePage extends StatelessWidget {
             child: UserAvatar(
               name: _name,
               avatarUrl: _avatarUrl,
+              cacheEpoch: Object.hash(_avatarUrl, ProfileSignals.instance.generation),
               radius: 56,
               showOnline: _isMechanic,
               isOnline: _online,

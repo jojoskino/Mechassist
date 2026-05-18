@@ -103,7 +103,14 @@ class User extends Authenticatable implements CanResetPasswordContract
 
     public function getAvatarUrlAttribute(): ?string
     {
-        return PublicStorageUrl::forPath($this->avatar_path);
+        $url = PublicStorageUrl::forPath($this->avatar_path);
+        if ($url === null) {
+            return null;
+        }
+        $version = $this->updated_at?->getTimestamp() ?? 0;
+        $sep = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$sep.'v='.$version;
     }
 
     public function getIsOnlineAttribute(): bool

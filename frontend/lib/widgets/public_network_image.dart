@@ -85,7 +85,7 @@ class PublicNetworkImage extends StatelessWidget {
           img = ClipRRect(borderRadius: borderRadius!, child: img);
         }
         return RepaintBoundary(
-          child: SizedBox(width: double.infinity, height: fixedH, child: img),
+          child: SizedBox(width: w, height: fixedH, child: img),
         );
       },
     );

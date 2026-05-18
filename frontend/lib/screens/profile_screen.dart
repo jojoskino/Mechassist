@@ -82,7 +82,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
       return;
     }
-    final res = await ApiService.getMe(token);
+    final res = await ApiService.getMe(token, force: true);
     if (!mounted) return;
     final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
     if (!ok) {
@@ -236,10 +236,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     setState(() {
       _uploadingPhoto = false;
-      _avatarUrl = res['avatar_url']?.toString();
-      _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+      _localAvatarBytes = null;
       _profileDirty = true;
     });
+    _applyProfileFromApi(res);
     ProfileSignals.instance.notifyProfilesChanged();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Photo de profil mise à jour.')),

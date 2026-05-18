@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\FirestoreSyncService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProfileController extends Controller
 {
@@ -28,8 +29,12 @@ class ProfileController extends Controller
             $request->validate([
                 'avatar' => ['required', 'image', 'max:5120', 'mimes:jpeg,jpg,png,webp'],
             ]);
+            $previous = $user->avatar_path;
             $path = $request->file('avatar')->store('avatars/'.$user->id, 'public');
             $user->avatar_path = $path;
+            if ($previous !== null && $previous !== '' && $previous !== $path) {
+                Storage::disk('public')->delete($previous);
+            }
         }
 
         $validated = $request->validate($rules);
