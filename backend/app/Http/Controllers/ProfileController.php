@@ -35,6 +35,7 @@ class ProfileController extends Controller
             if ($previous !== null && $previous !== '' && $previous !== $path) {
                 Storage::disk('public')->delete($previous);
             }
+            $user->updated_at = now();
         }
 
         $validated = $request->validate($rules);
@@ -42,6 +43,34 @@ class ProfileController extends Controller
         if ($user->role === 'mecanicien' && array_key_exists('is_available', $validated)) {
             $user->last_seen_at = now();
         }
+        $user->save();
+
+        $fresh = $user->fresh();
+
+        if ($fresh->role === 'mecanicien') {
+            dispatch(function () use ($firestore, $fresh): void {
+                $firestore->syncMechanicPresence($fresh);
+            })->afterResponse();
+        }
+
+        return response()->json($fresh);
+    }
+
+    /** Upload photo (POST multipart) — plus fiable que PATCH sur Flutter Web. */
+    public function uploadAvatar(Request $request, FirestoreSyncService $firestore)
+    {
+        $request->validate([
+            'avatar' => ['required', 'image', 'max:5120', 'mimes:jpeg,jpg,png,webp'],
+        ]);
+
+        $user = $request->user();
+        $previous = $user->avatar_path;
+        $path = $request->file('avatar')->store('avatars/'.$user->id, 'public');
+        $user->avatar_path = $path;
+        if ($previous !== null && $previous !== '' && $previous !== $path) {
+            Storage::disk('public')->delete($previous);
+        }
+        $user->updated_at = now();
         $user->save();
 
         $fresh = $user->fresh();

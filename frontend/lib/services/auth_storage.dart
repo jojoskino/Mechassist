@@ -6,6 +6,8 @@ class AuthStorage {
   static const _tokenKey = 'auth_token';
   static const _roleKey = 'user_role';
   static const _nameKey = 'user_name';
+  static const _avatarUrlKey = 'user_avatar_url';
+  static const _avatarEpochKey = 'user_avatar_epoch';
   static const _legacyTokenKey = 'auth_token';
 
   static const FlutterSecureStorage _secure = FlutterSecureStorage();
@@ -14,12 +16,38 @@ class AuthStorage {
     required String token,
     required String role,
     required String name,
+    String? avatarUrl,
+    int? avatarCacheEpoch,
   }) async {
     await _secure.write(key: _tokenKey, value: token);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_roleKey, role);
     await prefs.setString(_nameKey, name);
+    if (avatarUrl != null && avatarUrl.trim().isNotEmpty) {
+      await prefs.setString(_avatarUrlKey, avatarUrl.trim());
+    }
+    if (avatarCacheEpoch != null) {
+      await prefs.setInt(_avatarEpochKey, avatarCacheEpoch);
+    }
     await prefs.remove(_legacyTokenKey);
+  }
+
+  static Future<void> updateAvatar(String? avatarUrl, {int? cacheEpoch}) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (avatarUrl == null || avatarUrl.trim().isEmpty) {
+      await prefs.remove(_avatarUrlKey);
+    } else {
+      await prefs.setString(_avatarUrlKey, avatarUrl.trim());
+    }
+    await prefs.setInt(_avatarEpochKey, cacheEpoch ?? DateTime.now().millisecondsSinceEpoch);
+  }
+
+  static Future<({String? avatarUrl, int avatarEpoch})> getAvatarFields() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (
+      avatarUrl: prefs.getString(_avatarUrlKey),
+      avatarEpoch: prefs.getInt(_avatarEpochKey) ?? 0,
+    );
   }
 
   static Future<String?> getToken() async {
@@ -57,6 +85,8 @@ class AuthStorage {
     await prefs.remove(_legacyTokenKey);
     await prefs.remove(_roleKey);
     await prefs.remove(_nameKey);
+    await prefs.remove(_avatarUrlKey);
+    await prefs.remove(_avatarEpochKey);
   }
 
   static Future<bool> isLoggedIn() async {

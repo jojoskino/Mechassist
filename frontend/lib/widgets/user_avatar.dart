@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
 
 import '../services/api_service.dart';
+import '../services/profile_avatar_session.dart';
 import '../theme/feu_theme.dart';
 
-/// Avatar utilisateur avec pastille verte uniquement si [showOnline] et connecté.
+/// Avatar utilisateur : mémoire locale, puis réseau avec en-têtes (ngrok / CORS Web).
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
@@ -29,40 +30,70 @@ class UserAvatar extends StatelessWidget {
   final bool isOnline;
   final VoidCallback? onTap;
 
-  String? get _networkUrl {
+  String? get _resolvedNetworkUrl {
     final resolved = ApiService.resolvePublicUrl(avatarUrl);
     if (resolved.isEmpty) return null;
-    if (cacheEpoch == null) return resolved;
+    final epoch = cacheEpoch ?? ProfileAvatarSession.epochForUrl(avatarUrl) ?? 0;
+    if (epoch <= 0) return resolved;
     final sep = resolved.contains('?') ? '&' : '?';
-    return '$resolved${sep}v=$cacheEpoch';
+    return '$resolved${sep}v=$epoch';
   }
 
   @override
   Widget build(BuildContext context) {
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final diameter = radius * 2;
     final hasMemory = memoryBytes != null && memoryBytes!.isNotEmpty;
-    final networkUrl = _networkUrl;
-    final hasPhoto = hasMemory || (networkUrl != null && networkUrl.isNotEmpty);
+    final networkUrl = _resolvedNetworkUrl;
 
-    final imageKey = networkUrl != null
-        ? ValueKey<String>('avatar-${networkUrl.hashCode}-${cacheEpoch ?? 0}')
-        : null;
+    Widget face;
+    if (hasMemory) {
+      face = ClipOval(
+        child: Image.memory(
+          memoryBytes!,
+          width: diameter,
+          height: diameter,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+        ),
+      );
+    } else if (networkUrl != null && networkUrl.isNotEmpty) {
+      face = ClipOval(
+        key: ValueKey<String>(networkUrl),
+        child: Image.network(
+          networkUrl,
+          width: diameter,
+          height: diameter,
+          fit: BoxFit.cover,
+          headers: ApiService.imageRequestHeaders,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, __, ___) => _initialCircle(diameter, initial),
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return Container(
+              width: diameter,
+              height: diameter,
+              alignment: Alignment.center,
+              color: FeuTheme.deepBlue.withValues(alpha: 0.08),
+              child: SizedBox(
+                width: radius * 0.55,
+                height: radius * 0.55,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: FeuTheme.ember.withValues(alpha: 0.9),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } else {
+      face = _initialCircle(diameter, initial);
+    }
 
-    Widget avatar = CircleAvatar(
-      key: imageKey,
-      radius: radius,
-      backgroundColor: FeuTheme.deepBlue.withValues(alpha: 0.12),
-      foregroundColor: FeuTheme.deepBlue,
-      backgroundImage: hasMemory
-          ? MemoryImage(memoryBytes!)
-          : (networkUrl != null ? NetworkImage(networkUrl) : null),
-      child: hasPhoto
-          ? null
-          : Text(
-              initial,
-              style: AppFonts.style(fontWeight: FontWeight.w800, fontSize: radius * 0.85),
-            ),
-    );
+    Widget avatar = SizedBox(width: diameter, height: diameter, child: face);
 
     if (onTap != null) {
       avatar = GestureDetector(onTap: onTap, child: avatar);
@@ -90,6 +121,26 @@ class UserAvatar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _initialCircle(double diameter, String initial) {
+    return Container(
+      width: diameter,
+      height: diameter,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: FeuTheme.deepBlue.withValues(alpha: 0.12),
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        initial,
+        style: AppFonts.style(
+          fontWeight: FontWeight.w800,
+          fontSize: radius * 0.85,
+          color: FeuTheme.deepBlue,
+        ),
+      ),
     );
   }
 }

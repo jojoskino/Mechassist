@@ -31,6 +31,7 @@ Route::middleware(['auth:sanctum', 'throttle:mechassist-api'])->group(function (
 
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::patch('/profile', [ProfileController::class, 'update']);
+    Route::post('/profile/avatar', [ProfileController::class, 'uploadAvatar']);
 
     Route::post('/location', [LocationController::class, 'update']);
     Route::post('/presence/touch', [PresenceController::class, 'touch']);

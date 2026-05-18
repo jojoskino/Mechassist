@@ -12,6 +12,11 @@ class PublicStorageController extends Controller
      */
     public function show(string $path): Response
     {
+        $path = str_replace('\\', '/', $path);
+        if (str_contains($path, '..')) {
+            abort(404);
+        }
+
         $disk = Storage::disk('public');
         if (! $disk->exists($path)) {
             abort(404);

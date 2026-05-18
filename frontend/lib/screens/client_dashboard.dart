@@ -14,6 +14,7 @@ import '../services/app_notification_hub.dart';
 import '../services/in_app_notification_sync.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
+import '../services/profile_avatar_session.dart';
 import '../services/push_sync.dart';
 import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
@@ -109,6 +110,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     LiveSync.instance.addListener(_onLiveSync);
     _mechanicKeywordCtrl.addListener(_onMechanicSearchChanged);
     _applyMemoryCacheInstant();
+    unawaited(_hydrateMyAvatarFromStorage());
     _requestsSig = _signatureForRequests(requests);
     unawaited(_bootstrapClient());
     unawaited(InAppNotificationSync.instance.start());
@@ -138,14 +140,31 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   Future<void> _syncAvatarsAfterProfileChange() async {
     final token = await AuthStorage.getToken();
     if (token == null || !mounted) return;
+    final cached = await AuthStorage.getAvatarFields();
+    final signalUrl = ProfileSignals.instance.lastAvatarUrl;
+    if (signalUrl != null && signalUrl.isNotEmpty) {
+      setState(() {
+        _myAvatarUrl = signalUrl;
+        _myAvatarCacheEpoch = ProfileAvatarSession.cacheEpoch;
+      });
+    } else if (cached.avatarUrl != null && cached.avatarUrl!.isNotEmpty) {
+      setState(() {
+        _myAvatarUrl = cached.avatarUrl;
+        _myAvatarCacheEpoch = cached.avatarEpoch;
+      });
+    }
     final me = await ApiService.getMe(token, force: true);
     if (!mounted) return;
-    final ms = me['status'] as int?;
-    if (ms != null && ms >= 200 && ms < 300) {
+    if (ApiService.isHttpSuccess(me)) {
+      final url = me['avatar_url']?.toString();
       setState(() {
-        _myAvatarUrl = me['avatar_url']?.toString();
+        if (url != null && url.isNotEmpty) _myAvatarUrl = url;
         _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+        final name = me['name']?.toString();
+        if (name != null && name.isNotEmpty) currentName = name;
       });
+      ProfileAvatarSession.applyFromApi(me);
+      await AuthStorage.updateAvatar(_myAvatarUrl, cacheEpoch: _myAvatarCacheEpoch);
     }
     await _refreshRequestsOnly(forceNetwork: true);
     if (lat != null && lng != null) {
@@ -245,6 +264,25 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
 
   void _onMechanicSearchChanged() {
     // PERF: Le sheet écoute le contrôleur via ValueListenableBuilder — pas de rebuild global.
+  }
+
+  Future<void> _hydrateMyAvatarFromStorage() async {
+    if (ProfileAvatarSession.avatarUrl != null && ProfileAvatarSession.avatarUrl!.isNotEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _myAvatarUrl = ProfileAvatarSession.avatarUrl;
+        _myAvatarCacheEpoch = ProfileAvatarSession.cacheEpoch;
+      });
+      return;
+    }
+    final cached = await AuthStorage.getAvatarFields();
+    if (!mounted) return;
+    if (cached.avatarUrl == null || cached.avatarUrl!.isEmpty) return;
+    ProfileAvatarSession.bump(url: cached.avatarUrl);
+    setState(() {
+      _myAvatarUrl = cached.avatarUrl;
+      _myAvatarCacheEpoch = cached.avatarEpoch;
+    });
   }
 
   void _applyMemoryCacheInstant() {
@@ -491,11 +529,11 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       final position = batch[2] as Position?;
       final nearbyPreloaded = batch[3] as Map<String, dynamic>;
 
-      if (refreshProfile) {
-        final ms = me['status'] as int?;
-        if (ms != null && ms >= 200 && ms < 300) {
+      if (refreshProfile && ApiService.isHttpSuccess(me)) {
           _myAvatarUrl = me['avatar_url']?.toString();
           _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+          ProfileAvatarSession.applyFromApi(me);
+          await AuthStorage.updateAvatar(_myAvatarUrl, cacheEpoch: _myAvatarCacheEpoch);
           final name = me['name']?.toString();
           if (name != null && name.isNotEmpty) currentName = name;
           final apiRole = SessionRole.roleFromMe(me);
@@ -507,10 +545,15 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
               return;
             }
             if (apiRole == 'client') {
-              await AuthStorage.save(token: token, role: 'client', name: currentName);
+              await AuthStorage.save(
+                token: token,
+                role: 'client',
+                name: currentName,
+                avatarUrl: _myAvatarUrl,
+                avatarCacheEpoch: _myAvatarCacheEpoch,
+              );
             }
           }
-        }
       }
       if (position != null) {
         lat = position.latitude;
@@ -1210,28 +1253,49 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     return [
       MapsFilterChip(
         label: 'Toutes',
-        icon: Icons.grid_view_rounded,
-        selected: _minStarsFilter == 0 && _specialtyFilterCtrl.text.trim().isEmpty,
+        selected: _minStarsFilter == 0 &&
+            _specialtyFilterCtrl.text.trim().isEmpty &&
+            _searchRadiusKm == 5,
         onTap: () {
           setState(() {
             _minStarsFilter = 0;
             _specialtyFilterCtrl.clear();
-            _mechanicKeywordCtrl.clear();
+            _searchRadiusKm = 5;
           });
           _refreshAll(silent: true, requireFreshGps: false);
         },
       ),
       MapsFilterChip(
         label: '${_searchRadiusKm.round()} km',
-        icon: Icons.radar_rounded,
+        selected: _searchRadiusKm != 5,
         onTap: _cycleSearchRadius,
       ),
       MapsFilterChip(
-        label: _minStarsFilter == 0 ? 'Toutes notes' : '$_minStarsFilter★+',
-        icon: Icons.star_rounded,
+        label: _minStarsFilter == 0 ? 'Notes' : '$_minStarsFilter★+',
+        selected: _minStarsFilter > 0,
         onTap: _cycleMinStars,
       ),
+      MapsFilterChip(
+        label: 'Options',
+        selected: _clientFiltersActive,
+        onTap: _showClientFiltersSheet,
+      ),
     ];
+  }
+
+  Future<void> _openProfileFromHeader() async {
+    final result = await Navigator.pushNamed(context, '/profile');
+    if (!mounted) return;
+    final parsed = ProfileNavigationResult.fromDynamic(result);
+    if (parsed != null) {
+      setState(() {
+        if (parsed.avatarUrl != null && parsed.avatarUrl!.isNotEmpty) {
+          _myAvatarUrl = parsed.avatarUrl;
+          _myAvatarCacheEpoch = parsed.cacheEpoch ?? DateTime.now().millisecondsSinceEpoch;
+        }
+      });
+      if (parsed.updated) await _refreshAll(silent: true, requireFreshGps: false);
+    }
   }
 
   bool get _clientFiltersActive =>
@@ -1483,16 +1547,21 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       loading: _initializing && loading,
       bottomInset: bottomInset,
       searchController: _mechanicKeywordCtrl,
-      searchHint: searchMode ? 'Où êtes-vous ?' : 'Rechercher un mécanicien',
+      searchHint: searchMode ? 'Où êtes-vous ?' : 'Rechercher un mécanicien…',
       searchHintGps: searchMode,
-      onSearch: () {},
-      onFilterTap: searchMode ? null : _showClientFiltersSheet,
-      filtersActive: searchMode ? false : _clientFiltersActive,
+      onSearch: () => setState(() {}),
       initialSheetFraction: searchMode ? 0.48 : 0.38,
       onRecenter: _recenterMap,
       onPrimaryFab: () => _refreshAll(silent: true, requireFreshGps: false),
       onMenuTap: _openDrawer,
-      filterChips: const [],
+      filterChips: searchMode ? const [] : _clientFilterChips(),
+      searchTrailing: UserAvatar(
+        name: currentName,
+        avatarUrl: _myAvatarUrl,
+        cacheEpoch: _myAvatarCacheEpoch,
+        radius: 22,
+        onTap: _openProfileFromHeader,
+      ),
       sheetTitle: searchMode ? 'Recherche' : 'Mécaniciens proches',
       sheetSubtitle: _mechanicsSheetSubtitle(searchMode),
       subtitleAccent: !searchMode && _displayMechanics.isNotEmpty,

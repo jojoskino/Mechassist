@@ -4,6 +4,49 @@ import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
 import '../theme/feu_theme.dart';
 
+/// Style commun en-tête carte (client + mécanicien) — fond transparent, charte Feu.
+abstract final class MapsDiscoveryHeaderStyle {
+  static const double searchRadius = 50;
+  static const double menuSize = 44;
+  static const double searchHeight = 48;
+
+  static Color get _surfaceFill => Colors.white.withValues(alpha: 0.94);
+
+  static List<BoxShadow> get _elevation => [
+        BoxShadow(
+          color: FeuTheme.charcoal.withValues(alpha: 0.10),
+          blurRadius: 12,
+          offset: const Offset(0, 3),
+        ),
+      ];
+
+  static BoxDecoration menuDecoration() => BoxDecoration(
+        color: _surfaceFill,
+        shape: BoxShape.circle,
+        border: Border.all(color: FeuTheme.ember.withValues(alpha: 0.14)),
+        boxShadow: _elevation,
+      );
+
+  static BoxDecoration searchDecoration() => BoxDecoration(
+        color: _surfaceFill,
+        borderRadius: BorderRadius.circular(searchRadius),
+        border: Border.all(color: FeuTheme.ember.withValues(alpha: 0.12)),
+        boxShadow: _elevation,
+      );
+
+  static BoxDecoration chipDecoration({required bool selected}) => BoxDecoration(
+        color: selected ? FeuTheme.paper : _surfaceFill,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: selected
+              ? FeuTheme.deepBlue.withValues(alpha: 0.40)
+              : FeuTheme.ember.withValues(alpha: 0.16),
+          width: selected ? 1.2 : 1,
+        ),
+        boxShadow: _elevation,
+      );
+}
+
 /// Écran type Google Maps : carte plein écran, barre de recherche, puces, FAB, bottom sheet.
 class MapsDiscoveryShell extends StatefulWidget {
   const MapsDiscoveryShell({
@@ -31,6 +74,7 @@ class MapsDiscoveryShell extends StatefulWidget {
     this.sheetHeaderExtra,
     this.searchHintGps = false,
     this.onMenuTap,
+    this.searchTrailing,
     this.bottomInset = 72,
   });
 
@@ -57,6 +101,8 @@ class MapsDiscoveryShell extends StatefulWidget {
   final Widget? sheetHeaderExtra;
   final bool searchHintGps;
   final VoidCallback? onMenuTap;
+  /// Avatar ou action à droite de la barre de recherche (ex. profil mécanicien).
+  final Widget? searchTrailing;
   /// Espace sous le contenu (barre de navigation basse).
   final double bottomInset;
 
@@ -175,19 +221,14 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
             children: [
               SizedBox(height: topPad + 8),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    if (widget.onMenuTap != null)
-                      IconButton(
-                        onPressed: widget.onMenuTap,
-                        tooltip: 'Menu',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                        icon: const Icon(Icons.menu_rounded, color: FeuTheme.deepBlue, size: 26),
-                      ),
-                    if (widget.onMenuTap != null) const SizedBox(width: 6),
+                    if (widget.onMenuTap != null) ...[
+                      _MapsMenuButton(onTap: widget.onMenuTap!),
+                      const SizedBox(width: 10),
+                    ],
                     Expanded(
                       child: _MapsSearchBar(
                         controller: widget.searchController,
@@ -199,26 +240,32 @@ class _MapsDiscoveryShellState extends State<MapsDiscoveryShell> {
                         filtersActive: widget.filtersActive,
                       ),
                     ),
+                    if (widget.searchTrailing != null) ...[
+                      const SizedBox(width: 10),
+                      widget.searchTrailing!,
+                    ],
                   ],
                 ),
               ),
               if (widget.filterChips.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
                   child: SizedBox(
-                    height: 40,
+                    height: 34,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       itemCount: widget.filterChips.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 8),
                       itemBuilder: (_, i) => widget.filterChips[i],
                     ),
                   ),
-                ),
+                )
+              else
+                const SizedBox(height: 12),
               if (widget.topBanner != null)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 6),
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
                   child: widget.topBanner!,
                 ),
             ],
@@ -410,6 +457,30 @@ class _SheetDragHeader extends StatelessWidget {
   }
 }
 
+/// Bouton menu circulaire (mockup barre de recherche).
+class _MapsMenuButton extends StatelessWidget {
+  const _MapsMenuButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Ink(
+          width: MapsDiscoveryHeaderStyle.menuSize,
+          height: MapsDiscoveryHeaderStyle.menuSize,
+          decoration: MapsDiscoveryHeaderStyle.menuDecoration(),
+          child: const Icon(Icons.menu_rounded, color: FeuTheme.deepBlue, size: 24),
+        ),
+      ),
+    );
+  }
+}
+
 class _MapsSearchBar extends StatelessWidget {
   const _MapsSearchBar({
     this.controller,
@@ -431,58 +502,67 @@ class _MapsSearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(MapsDiscoveryHeaderStyle.searchRadius);
+    final fill = MapsDiscoveryHeaderStyle.searchDecoration().color ?? Colors.white;
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: FeuTheme.charcoal.withValues(alpha: 0.08)),
-        boxShadow: [
-          BoxShadow(
-            color: FeuTheme.charcoal.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+      height: MapsDiscoveryHeaderStyle.searchHeight,
+      decoration: MapsDiscoveryHeaderStyle.searchDecoration(),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              onChanged: onChanged == null ? null : (_) => onChanged!(),
+              onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+              style: AppFonts.style(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: FeuTheme.charcoal,
+              ),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: AppFonts.style(
+                  color: FeuTheme.charcoal.withValues(alpha: 0.45),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: FeuTheme.deepBlue.withValues(alpha: 0.70),
+                  size: 22,
+                ),
+                suffixIcon: showGpsIcon
+                    ? Icon(Icons.near_me_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.55), size: 20)
+                    : (onFilterTap != null
+                        ? IconButton(
+                            onPressed: onFilterTap,
+                            tooltip: 'Filtres',
+                            icon: Icon(
+                              Icons.tune_rounded,
+                              color: filtersActive ? FeuTheme.ember : FeuTheme.deepBlue.withValues(alpha: 0.55),
+                              size: 22,
+                            ),
+                          )
+                        : null),
+                filled: true,
+                fillColor: fill,
+                border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: radius,
+                  borderSide: BorderSide(color: FeuTheme.deepBlue.withValues(alpha: 0.35), width: 1),
+                ),
+                disabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none),
+                errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none),
+                focusedErrorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
           ),
         ],
       ),
-      child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  textInputAction: TextInputAction.search,
-                  onChanged: onChanged == null ? null : (_) => onChanged!(),
-                  onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
-                  style: AppFonts.style(fontSize: 15, fontWeight: FontWeight.w500),
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    hintStyle: AppFonts.style(color: Colors.grey.shade500, fontSize: 15),
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      color: FeuTheme.deepBlue.withValues(alpha: 0.65),
-                      size: 22,
-                    ),
-                    suffixIcon: showGpsIcon
-                        ? Icon(Icons.near_me_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.5), size: 20)
-                        : null,
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ),
-              if (onFilterTap != null)
-                IconButton(
-                  onPressed: onFilterTap,
-                  tooltip: 'Filtres',
-                  icon: Icon(
-                    Icons.tune_rounded,
-                    color: filtersActive ? FeuTheme.ember : FeuTheme.deepBlue.withValues(alpha: 0.7),
-                    size: 22,
-                  ),
-                ),
-              const SizedBox(width: 4),
-            ],
-          ),
     );
   }
 }
@@ -546,32 +626,23 @@ class MapsFilterChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? FeuTheme.deepBlue.withValues(alpha: 0.12) : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal.withValues(alpha: 0.12),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: FeuTheme.charcoal.withValues(alpha: 0.08),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          decoration: MapsDiscoveryHeaderStyle.chipDecoration(selected: selected),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 18, color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal),
+                Icon(
+                  icon,
+                  size: 16,
+                  color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal.withValues(alpha: 0.75),
+                ),
                 const SizedBox(width: 6),
               ],
               Text(
                 label,
                 style: AppFonts.style(
-                  fontSize: 13.5,
+                  fontSize: 13,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? FeuTheme.deepBlue : FeuTheme.charcoal,
                 ),

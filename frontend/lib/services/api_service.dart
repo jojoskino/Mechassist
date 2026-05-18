@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../utils/api_perf.dart';
@@ -140,6 +141,30 @@ class ApiService {
       return 'Connexion lente. Réessayez dans quelques secondes.';
     }
     return fallback;
+  }
+
+  /// Succès HTTP (évite la confusion avec le champ métier `status` des demandes).
+  static bool isHttpSuccess(Map<String, dynamic> res) {
+    final code = res['http_status'] as int?;
+    if (code != null) return code >= 200 && code < 300;
+    final legacy = res['status'];
+    if (legacy is int) return legacy >= 200 && legacy < 300;
+    return false;
+  }
+
+  static int? httpStatusOf(Map<String, dynamic> res) =>
+      res['http_status'] as int? ?? (res['status'] is int ? res['status'] as int : null);
+
+  /// Précharge une image réseau (avatar) avec les bons en-têtes.
+  static Future<void> precacheAvatarUrl(String? url, BuildContext context) async {
+    final resolved = resolvePublicUrl(url);
+    if (resolved.isEmpty || !context.mounted) return;
+    try {
+      await precacheImage(
+        NetworkImage(resolved, headers: imageRequestHeaders),
+        context,
+      );
+    } catch (_) {}
   }
 
   /// Erreur réseau transitoire — ne pas afficher à l’utilisateur.
@@ -441,8 +466,8 @@ class ApiService {
         headers: _authHeaders(token),
       ));
       final body = _parseBody(response);
-      final st = body['status'] as int?;
-      if (st != null && st >= 200 && st < 300) {
+      body['http_status'] = response.statusCode;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         ApiResponseCache.putMe(token, body);
       }
       return body;
@@ -762,8 +787,8 @@ class ApiService {
         body: jsonEncode(fields),
       ));
       final body = _parseBody(response);
-      final st = body['status'] as int?;
-      if (st != null && st >= 200 && st < 300) {
+      body['http_status'] = response.statusCode;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         ApiResponseCache.invalidateMe();
       }
       return body;
@@ -778,16 +803,35 @@ class ApiService {
     Uint8List bytes,
     String filename,
   ) async {
+    var res = await _multipartProfileAvatar(token, bytes, filename, useLegacyPatch: false);
+    if (!isHttpSuccess(res) && httpStatusOf(res) == 404) {
+      res = await _multipartProfileAvatar(token, bytes, filename, useLegacyPatch: true);
+    }
+    return res;
+  }
+
+  static Future<Map<String, dynamic>> _multipartProfileAvatar(
+    String token,
+    Uint8List bytes,
+    String filename, {
+    required bool useLegacyPatch,
+  }) async {
     try {
-      final request = http.MultipartRequest('PATCH', Uri.parse('$_apiRoot/profile'));
+      final uri = useLegacyPatch
+          ? Uri.parse('$_apiRoot/profile')
+          : Uri.parse('$_apiRoot/profile/avatar');
+      final request = http.MultipartRequest(
+        useLegacyPatch ? 'PATCH' : 'POST',
+        uri,
+      );
       request.headers['Accept'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
       _applyTunnelHeaders(request);
       request.files.add(http.MultipartFile.fromBytes('avatar', bytes, filename: filename));
       final response = await _twMultipart(request);
       final body = _parseBody(response);
-      final st = body['status'] as int?;
-      if (st != null && st >= 200 && st < 300) {
+      body['http_status'] = response.statusCode;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         ApiResponseCache.invalidateMe();
         ApiResponseCache.invalidateRequestLists();
       }

@@ -7,6 +7,7 @@ import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
 import '../utils/api_perf.dart';
 import '../services/auth_storage.dart';
+import '../services/profile_avatar_session.dart';
 import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
 import 'register_screen.dart';
@@ -96,7 +97,9 @@ class _LoginScreenState extends State<LoginScreen> {
         token: apiToken,
         role: user['role']?.toString() ?? 'client',
         name: user['name']?.toString() ?? '',
+        avatarUrl: user['avatar_url']?.toString(),
       );
+      await ProfileAvatarSession.persistFromUser(user);
       if (!mounted) return;
       _navigateByRole(user['role']?.toString() ?? 'client');
       await PushSync.syncToken();

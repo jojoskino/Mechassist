@@ -30,6 +30,7 @@ import '../services/app_notification_hub.dart';
 import '../services/in_app_notification_sync.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
+import '../services/profile_avatar_session.dart';
 import '../utils/profile_navigation.dart';
 import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
@@ -88,6 +89,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     ProfileSignals.instance.addListener(_onProfilesExternallyUpdated);
     LiveSync.instance.addListener(_onLiveSync);
     _applyMemoryCacheInstant();
+    unawaited(_hydrateMyAvatarFromStorage());
     _requestsSig = _signatureForRequests(requests);
     unawaited(_bootstrapMechanic());
     unawaited(InAppNotificationSync.instance.start());
@@ -194,6 +196,25 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       permission = await Geolocator.requestPermission();
     }
     return permission != LocationPermission.denied && permission != LocationPermission.deniedForever;
+  }
+
+  Future<void> _hydrateMyAvatarFromStorage() async {
+    if (ProfileAvatarSession.avatarUrl != null && ProfileAvatarSession.avatarUrl!.isNotEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _myAvatarUrl = ProfileAvatarSession.avatarUrl;
+        _myAvatarCacheEpoch = ProfileAvatarSession.cacheEpoch;
+      });
+      return;
+    }
+    final cached = await AuthStorage.getAvatarFields();
+    if (!mounted) return;
+    if (cached.avatarUrl == null || cached.avatarUrl!.isEmpty) return;
+    ProfileAvatarSession.bump(url: cached.avatarUrl);
+    setState(() {
+      _myAvatarUrl = cached.avatarUrl;
+      _myAvatarCacheEpoch = cached.avatarEpoch;
+    });
   }
 
   void _applyMemoryCacheInstant() {
@@ -341,14 +362,31 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   Future<void> _syncAvatarsAfterProfileChange() async {
     final token = await AuthStorage.getToken();
     if (token == null || !mounted) return;
+    final cached = await AuthStorage.getAvatarFields();
+    final signalUrl = ProfileSignals.instance.lastAvatarUrl;
+    if (signalUrl != null && signalUrl.isNotEmpty) {
+      setState(() {
+        _myAvatarUrl = signalUrl;
+        _myAvatarCacheEpoch = ProfileAvatarSession.cacheEpoch;
+      });
+    } else if (cached.avatarUrl != null && cached.avatarUrl!.isNotEmpty) {
+      setState(() {
+        _myAvatarUrl = cached.avatarUrl;
+        _myAvatarCacheEpoch = cached.avatarEpoch;
+      });
+    }
     final me = await ApiService.getMe(token, force: true);
     if (!mounted) return;
-    final ms = me['status'] as int?;
-    if (ms != null && ms >= 200 && ms < 300) {
+    if (ApiService.isHttpSuccess(me)) {
+      final url = me['avatar_url']?.toString();
       setState(() {
-        _myAvatarUrl = me['avatar_url']?.toString();
+        if (url != null && url.isNotEmpty) _myAvatarUrl = url;
         _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+        final name = me['name']?.toString();
+        if (name != null && name.isNotEmpty) currentName = name;
       });
+      ProfileAvatarSession.applyFromApi(me);
+      await AuthStorage.updateAvatar(_myAvatarUrl, cacheEpoch: _myAvatarCacheEpoch);
     }
     await _refreshRequestsOnly(silent: true, forceNetwork: true);
   }
@@ -595,8 +633,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       final me = results[0] as Map<String, dynamic>;
       final reqs = results[1] as Map<String, dynamic>;
 
-      final ms = me['status'] as int?;
-      if (refreshProfile && ms != null && ms >= 200 && ms < 300) {
+      if (refreshProfile && ApiService.isHttpSuccess(me)) {
         final rawAvail = me['is_available'];
         available = rawAvail is bool
             ? rawAvail
@@ -605,6 +642,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
         currentRole = me['role']?.toString() ?? 'mecanicien';
         _myAvatarUrl = me['avatar_url']?.toString();
         _myAvatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+        ProfileAvatarSession.applyFromApi(me);
+        await AuthStorage.updateAvatar(_myAvatarUrl, cacheEpoch: _myAvatarCacheEpoch);
         final mlat = (me['latitude'] as num?)?.toDouble();
         final mlng = (me['longitude'] as num?)?.toDouble();
         if (mlat != null && mlng != null) {
@@ -927,8 +966,6 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
         ('pending', 'En attente'),
         ('accepted', 'Acceptées'),
         ('completed', 'Terminées'),
-        ('declined', 'Refusées'),
-        ('cancelled', 'Annulées'),
       ])
         MapsFilterChip(
           label: e.$2,
@@ -1211,6 +1248,13 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
       primaryFabIcon: Icons.refresh_rounded,
       filterChips: _mechanicFilterChips(),
       onMenuTap: _openDrawer,
+      searchTrailing: UserAvatar(
+        name: currentName,
+        avatarUrl: _myAvatarUrl,
+        cacheEpoch: _myAvatarCacheEpoch,
+        radius: 22,
+        onTap: () => setState(() => _tabIndex = 2),
+      ),
       sheetTitle: 'Zone d\'intervention',
       sheetSubtitle: lat != null
           ? '${_activeRequests.length} intervention(s) active(s) · ${_jobSitesForMap().length} sur la carte'

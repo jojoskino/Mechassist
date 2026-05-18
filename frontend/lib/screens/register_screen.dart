@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/profile_avatar_session.dart';
 import '../services/push_sync.dart';
 import '../widgets/auth_shell.dart';
 
@@ -80,7 +81,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         token: apiToken,
         role: user['role']?.toString() ?? role,
         name: user['name']?.toString() ?? nameCtrl.text.trim(),
+        avatarUrl: user['avatar_url']?.toString(),
       );
+      await ProfileAvatarSession.persistFromUser(user);
       if (!mounted) return;
       _showSnack('Compte créé avec succès');
       Navigator.pushReplacementNamed(

@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/profile_signals.dart';
+import '../services/profile_avatar_session.dart';
 import '../services/push_preferences.dart';
 import '../services/push_sync.dart';
 import '../theme/feu_theme.dart';
@@ -63,13 +64,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadFromSession() async {
     final fields = await AuthStorage.getSessionFields();
+    final av = await AuthStorage.getAvatarFields();
     if (!mounted) return;
     final name = fields['name']?.toString();
     if (name != null && name.isNotEmpty) {
       _nameCtrl.text = name;
     }
     _role = fields['role']?.toString() ?? 'client';
-    setState(() => _loading = false);
+    if (av.avatarUrl != null && av.avatarUrl!.isNotEmpty) {
+      _avatarUrl = av.avatarUrl;
+      _avatarCacheEpoch = av.avatarEpoch;
+      ProfileAvatarSession.bump(url: av.avatarUrl);
+    } else if (ProfileAvatarSession.avatarUrl != null) {
+      _avatarUrl = ProfileAvatarSession.avatarUrl;
+      _avatarCacheEpoch = ProfileAvatarSession.cacheEpoch;
+    }
+    setState(() {});
   }
 
   Future<void> _load() async {
@@ -84,7 +94,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     final res = await ApiService.getMe(token, force: true);
     if (!mounted) return;
-    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    final ok = ApiService.isHttpSuccess(res);
     if (!ok) {
       setState(() {
         _loading = false;
@@ -98,6 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _applyProfileFromApi(res);
+    await ProfileAvatarSession.persistFromUser(res);
     _loadWarning = null;
     _pushEnabled = await PushPreferences.isEnabled();
     setState(() => _loading = false);
@@ -111,6 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _specialtyCtrl.text = res['mechanic_specialty']?.toString() ?? '';
     _avatarUrl = res['avatar_url']?.toString();
     _avatarCacheEpoch = DateTime.now().millisecondsSinceEpoch;
+    ProfileAvatarSession.applyFromApi(res);
     final av = res['is_available'];
     _mechanicAvailable = av is bool ? av : av == 1 || av?.toString() == '1';
   }
@@ -133,9 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     final res = await ApiService.patchProfile(token, fields);
     if (!mounted) return false;
-    final code = res['status'] as int?;
-    final ok = code != null && code >= 200 && code < 300;
-    if (!ok) {
+    if (!ApiService.isHttpSuccess(res)) {
       _showSnack(
         ApiService.userFacingMessage(res, fallback: 'Enregistrement impossible'),
         isError: true,
@@ -143,12 +153,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return false;
     }
     _applyProfileFromApi(res);
+    await ProfileAvatarSession.persistFromUser(res);
     final name = res['name']?.toString().trim();
     if (name != null && name.isNotEmpty) {
       await AuthStorage.updateName(name);
     }
     _profileDirty = true;
-    ProfileSignals.instance.notifyProfilesChanged();
+    ProfileSignals.instance.notifyProfilesChanged(avatarUrl: _avatarUrl);
     return true;
   }
 
@@ -213,7 +224,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _pickAvatar(ImageSource source) async {
     final token = await AuthStorage.getToken();
-    if (token == null) return;
+    if (token == null) {
+      _showSnack('Session expirée.', isError: true);
+      return;
+    }
     final x = await _picker.pickImage(source: source, maxWidth: 1200, imageQuality: 88);
     if (x == null) return;
     final bytes = await x.readAsBytes();
@@ -223,27 +237,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _uploadingPhoto = true;
     });
     final name = x.name.isNotEmpty ? x.name : 'avatar.jpg';
-    final res = await ApiService.uploadProfileAvatar(token, bytes, name);
+    var res = await ApiService.uploadProfileAvatar(token, bytes, name);
     if (!mounted) return;
-    final code = res['status'] as int?;
-    final ok = code != null && code >= 200 && code < 300;
-    if (!ok) {
-      setState(() => _uploadingPhoto = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res['message']?.toString() ?? 'Photo impossible')),
+
+    if (!ApiService.isHttpSuccess(res)) {
+      res = await ApiService.uploadProfileAvatar(token, bytes, name);
+      if (!mounted) return;
+    }
+
+    if (!ApiService.isHttpSuccess(res)) {
+      setState(() {
+        _uploadingPhoto = false;
+        _localAvatarBytes = null;
+      });
+      _showSnack(
+        ApiService.userFacingMessage(res, fallback: 'Photo impossible. Vérifiez que Laravel tourne.'),
+        isError: true,
       );
       return;
     }
+
+    _applyProfileFromApi(res);
+    await ProfileAvatarSession.persistFromUser(res);
+    await ApiService.precacheAvatarUrl(_avatarUrl, context);
+
+    if (!mounted) return;
     setState(() {
       _uploadingPhoto = false;
       _localAvatarBytes = null;
       _profileDirty = true;
     });
-    _applyProfileFromApi(res);
-    ProfileSignals.instance.notifyProfilesChanged();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Photo de profil mise à jour.')),
-    );
+    ProfileSignals.instance.notifyProfilesChanged(avatarUrl: _avatarUrl);
+    _showSnack('Photo de profil mise à jour.');
   }
 
   void _showPhotoOptions() {
@@ -373,9 +398,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final res = await ApiService.patchProfile(token, body);
     if (!mounted) return;
     setState(() => _saving = false);
-    final code = res['status'] as int?;
-    final ok = code != null && code >= 200 && code < 300;
-    if (!ok) {
+    if (!ApiService.isHttpSuccess(res)) {
       _showSnack(
         ApiService.userFacingMessage(res, fallback: 'Enregistrement impossible'),
         isError: true,
@@ -383,6 +406,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     _applyProfileFromApi(res);
+    await ProfileAvatarSession.persistFromUser(res);
     final name = res['name']?.toString().trim();
     if (name != null && name.isNotEmpty) {
       await AuthStorage.updateName(name);
@@ -393,7 +417,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _profileDirty = true;
       _loadWarning = null;
     });
-    ProfileSignals.instance.notifyProfilesChanged();
+    ProfileSignals.instance.notifyProfilesChanged(avatarUrl: _avatarUrl);
   }
 
   @override

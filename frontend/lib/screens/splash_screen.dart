@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/api_keep_alive.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/profile_avatar_session.dart';
 import '../services/session_role.dart';
 import '../services/push_sync.dart';
 import '../utils/gps_position_tracker.dart';
@@ -60,7 +61,16 @@ class _SplashScreenState extends State<SplashScreen> {
     final apiRole = SessionRole.roleFromMe(me);
     if (apiRole == null) return fallback;
     final name = (await AuthStorage.getSessionFields())['name'] ?? '';
-    await AuthStorage.save(token: token, role: apiRole, name: name);
+    final avatarUrl = me['avatar_url']?.toString();
+    await AuthStorage.save(
+      token: token,
+      role: apiRole,
+      name: name,
+      avatarUrl: avatarUrl,
+    );
+    if (ApiService.isHttpSuccess(me)) {
+      await ProfileAvatarSession.persistFromUser(me);
+    }
     return apiRole;
   }
 
