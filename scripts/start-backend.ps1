@@ -38,6 +38,18 @@ finally {
     Pop-Location
 }
 
+Push-Location $backend
+try {
+    $storageLink = Join-Path $backend "public\storage"
+    if (-not (Test-Path $storageLink)) {
+        Write-Host "Lien storage public (photos)..." -ForegroundColor DarkGray
+        php artisan storage:link 2>&1 | Out-Null
+    }
+}
+finally {
+    Pop-Location
+}
+
 Write-Host "Demarrage Laravel (port $Port)..." -ForegroundColor Cyan
 Push-Location $backend
 try {

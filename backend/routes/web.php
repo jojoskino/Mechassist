@@ -1,7 +1,12 @@
 <?php
 
+use App\Http\Controllers\PublicStorageController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/media/{path}', [PublicStorageController::class, 'show'])
+    ->where('path', '.*')
+    ->name('media.public');
 
 Route::get('/', function () {
     return view('welcome');

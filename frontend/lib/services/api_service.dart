@@ -166,15 +166,35 @@ class ApiService {
     if (relativeOrAbsolute == null || relativeOrAbsolute.isEmpty) {
       return '';
     }
-    final s = relativeOrAbsolute.trim();
+    var s = relativeOrAbsolute.trim();
     if (s.startsWith('http://') || s.startsWith('https://')) {
-      return _rewriteLocalhostHost(s);
+      s = _rewriteLocalhostHost(s);
+    } else {
+      final origin = serverOrigin;
+      if (s.startsWith('/media/') || s.startsWith('/storage/')) {
+        s = '$origin$s';
+      } else if (s.startsWith('/')) {
+        s = '$origin$s';
+      } else {
+        s = '$origin/media/$s';
+      }
     }
-    final origin = serverOrigin;
-    if (s.startsWith('/')) {
-      return '$origin$s';
+    return _alignWebImageHost(s);
+  }
+
+  /// Sur Flutter Web (localhost:53100), aligne l'hôte image avec la page si besoin.
+  static String _alignWebImageHost(String url) {
+    if (!kIsWeb) return url;
+    final imageUri = Uri.tryParse(url);
+    if (imageUri == null) return url;
+    final pageHost = Uri.base.host.toLowerCase();
+    final imageHost = imageUri.host.toLowerCase();
+    if (pageHost.isEmpty) return url;
+    if ((pageHost == 'localhost' && imageHost == '127.0.0.1') ||
+        (pageHost == '127.0.0.1' && imageHost == 'localhost')) {
+      return imageUri.replace(host: pageHost).toString();
     }
-    return '$origin/$s';
+    return url;
   }
 
   static String _rewriteLocalhostHost(String url) {
@@ -636,6 +656,25 @@ class ApiService {
     LiveSync.instance.pulse();
   }
 
+  static Future<Map<String, dynamic>> listNotifications(String token) async {
+    try {
+      final response = await _tw(() => _client.get(
+        Uri.parse('$_apiRoot/notifications'),
+        headers: _authHeaders(token, json: false),
+      ));
+      final decoded = _tryJsonDecode(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'status': response.statusCode, 'data': decoded};
+      }
+      return {
+        'status': response.statusCode,
+        'message': decoded is Map ? decoded['message']?.toString() : null,
+      };
+    } catch (e) {
+      return _networkFailure(e);
+    }
+  }
+
   static Future<Map<String, dynamic>> listRequests(
     String token, {
     String? status,
@@ -901,6 +940,9 @@ class ApiService {
       final decoded = _tryJsonDecode(response.body);
       if (response.statusCode >= 200 && response.statusCode < 300) {
         if (decoded is List) {
+          if (markRead) {
+            ApiResponseCache.invalidateMessages(requestId);
+          }
           ApiResponseCache.putMessages(requestId, decoded);
         }
         return {'status': response.statusCode, 'data': decoded};

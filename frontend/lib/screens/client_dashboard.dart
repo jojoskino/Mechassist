@@ -11,6 +11,7 @@ import '../services/client_config_cache.dart';
 import '../services/refresh_coordinator.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/app_notification_hub.dart';
+import '../services/in_app_notification_sync.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
 import '../services/push_sync.dart';
@@ -108,6 +109,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _applyMemoryCacheInstant();
     _requestsSig = _signatureForRequests(requests);
     unawaited(_bootstrapClient());
+    unawaited(InAppNotificationSync.instance.start());
     _scheduleRefreshTimer();
     _syncPush();
     _startPositionTracking();
@@ -324,6 +326,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     _specialtyFilterCtrl.dispose();
     _mechanicKeywordCtrl.dispose();
     _requestSearchCtrl.dispose();
+    InAppNotificationSync.instance.stop();
     AppNotificationHub.instance.removeListener(_onNotificationsChanged);
     ProfileSignals.instance.removeListener(_onProfilesExternallyUpdated);
     LiveSync.instance.removeListener(_onLiveSync);
@@ -1570,6 +1573,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     final rt = r['rating'];
     showDialog<void>(
       context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         title: Text('Demande #${id ?? '—'}'),
         content: SingleChildScrollView(
@@ -1630,8 +1635,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
                 GestureDetector(
                   onTap: () {
                     Navigator.pop(ctx);
-                    Navigator.push<void>(
-                      context,
+                    Navigator.of(context, rootNavigator: true).push<void>(
                       MaterialPageRoute<void>(
                         builder: (_) => FullScreenImagePage(
                           imageUrl: r['photo_url'].toString(),

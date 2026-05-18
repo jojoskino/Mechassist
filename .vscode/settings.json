@@ -1,11 +1,5 @@
 {
     "java.configuration.updateBuildConfiguration": "interactive",
-    "dart.flutterRunAdditionalArgs": [
-        "-d",
-        "web-server",
-        "--web-port=53100",
-        "--web-hostname=localhost",
-        "--dart-define=API_BASE_URL=http://127.0.0.1:8000"
-    ],
+    "dart.flutterRunAdditionalArgs": [],
     "dart.flutterTestAdditionalArgs": []
 }

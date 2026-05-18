@@ -2,13 +2,12 @@
 
 namespace App\Support;
 
-use Illuminate\Support\Facades\Request;
+use Illuminate\Support\Facades\Storage;
 
 class PublicStorageUrl
 {
     /**
      * URL absolue pour un fichier du disque `public` (photos demandes, médias chat).
-     * Utilise l’hôte de la requête API pour que les téléphones n’obtiennent pas `http://localhost/...`.
      */
     public static function forPath(?string $path): ?string
     {
@@ -16,14 +15,21 @@ class PublicStorageUrl
             return null;
         }
 
-        $relative = '/storage/'.ltrim($path, '/');
+        $base = rtrim((string) config('app.url'), '/');
+        $clean = ltrim($path, '/');
 
-        if (! app()->runningInConsole() && Request::hasHeader('Host')) {
-            return rtrim(Request::getSchemeAndHttpHost(), '/').$relative;
+        return $base.'/media/'.$clean;
+    }
+
+    /**
+     * Vérifie que le fichier existe sur le disque public.
+     */
+    public static function exists(?string $path): bool
+    {
+        if ($path === null || $path === '') {
+            return false;
         }
 
-        $base = config('app.asset_url') ?: config('app.url');
-
-        return rtrim((string) $base, '/').$relative;
+        return Storage::disk('public')->exists($path);
     }
 }

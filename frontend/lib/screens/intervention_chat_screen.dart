@@ -10,8 +10,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
 import '../services/api_data_cache.dart';
+import '../services/api_response_cache.dart';
 import '../services/api_service.dart';
+import '../services/app_notification_hub.dart';
 import '../services/auth_storage.dart';
+import '../services/in_app_notification_sync.dart';
 import '../services/profile_signals.dart';
 import '../theme/feu_theme.dart';
 import '../utils/read_file_bytes.dart';
@@ -114,7 +117,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       if (!_foreground) return;
       final route = ModalRoute.of(context);
       if (route != null && !route.isCurrent) return;
-      unawaited(_load(silent: true));
+      unawaited(_load(silent: true, markRead: !_readOnly));
     });
   }
 
@@ -188,7 +191,7 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         _readOnly = true;
         _accessHint = res['message']?.toString() ?? 'Impossible de charger la demande.';
       });
-      await _load(silent: true, markRead: _messages.isEmpty);
+      await _markConversationRead();
       return;
     }
     _applyPeerFromRequest(res);
@@ -215,7 +218,18 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
         }
       });
     }
-    await _load(silent: true, markRead: _messages.isEmpty);
+    await _markConversationRead();
+  }
+
+  Future<void> _markConversationRead() async {
+    if (_readOnly || _authToken == null) {
+      await _load(silent: true);
+      return;
+    }
+    ApiResponseCache.invalidateMessages(widget.requestId);
+    await _load(silent: true, markRead: true);
+    AppNotificationHub.instance.clearChatForRequest(widget.requestId);
+    unawaited(InAppNotificationSync.instance.refresh());
   }
 
   bool _messagesEqual(List<dynamic> a, List<dynamic> b) {
@@ -270,6 +284,9 @@ class _InterventionChatScreenState extends State<InterventionChatScreen>
       });
     }
     if (changed) {
+      if (markRead) {
+        AppNotificationHub.instance.clearChatForRequest(widget.requestId);
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scroll.hasClients) {
           _scroll.animateTo(

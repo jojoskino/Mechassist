@@ -5,6 +5,7 @@ use App\Http\Controllers\ChatMessageController;
 use App\Http\Controllers\InterventionRequestController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MechanicSearchController;
+use App\Http\Controllers\NotificationInboxController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\ProfileController;
@@ -34,6 +35,8 @@ Route::middleware(['auth:sanctum', 'throttle:mechassist-api'])->group(function (
     Route::post('/location', [LocationController::class, 'update']);
     Route::post('/presence/touch', [PresenceController::class, 'touch']);
     Route::get('/mechanics/nearby', [MechanicSearchController::class, 'nearby']);
+
+    Route::get('/notifications', [NotificationInboxController::class, 'index']);
 
     Route::get('/requests', [InterventionRequestController::class, 'index']);
     Route::post('/requests', [InterventionRequestController::class, 'store']);

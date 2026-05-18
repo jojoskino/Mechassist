@@ -2,13 +2,17 @@
 param(
     [Parameter(Mandatory)]
     [int]$Port,
-    [int]$TimeoutSeconds = 15
+    [int]$TimeoutSeconds = 20
 )
+
+function Test-PortListening {
+    param([int]$p)
+    return (@(Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)).Count -gt 0
+}
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt $deadline) {
-    $busy = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-    if ($busy.Count -eq 0) { return $true }
-    Start-Sleep -Milliseconds 250
+    if (-not (Test-PortListening -p $Port)) { return $true }
+    Start-Sleep -Milliseconds 300
 }
-return $false
+return -not (Test-PortListening -p $Port)

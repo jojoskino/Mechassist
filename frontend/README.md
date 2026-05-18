@@ -7,9 +7,12 @@ Un workflow GitHub Actions (`.github/workflows/ci.yml`) exécute `php artisan te
 ## Démarrage rapide
 
 - **PostgreSQL local** : base `MechAssist_db` sur `127.0.0.1:5432` (voir `backend/.env`).
-- API Laravel : `php artisan serve --host=0.0.0.0 --port=8000` (ou démarrage auto via les scripts).
-- **Lancement Web (1 seul onglet)** — ne pas utiliser `flutter run` puis Edge (ouvre souvent 4 onglets) :
-  - `.\flutter_run.ps1` ou `.\run_web.ps1` → http://localhost:53100 + API `http://127.0.0.1:8000`
+- **Ports fixes (obligatoires)** : API **8000** | client **53100** | mécanicien **53101**
+- **2 terminaux** : `.\run_client.ps1` puis `.\run_mechanic.ps1` (ne jamais les deux sur 53100)
+- **Ou une commande** : `powershell -File ..\scripts\start-both-frontends.ps1` (2 fenêtres)
+- API seule : `.\start.ps1` ou `php artisan serve --port=8000`
+- **`flutter run` seul** : menu Flutter normal ; évitez `chrome`/`edge` (multi-onglets), préférez `web-server`
+- Une instance web : `.\flutter_run.ps1 -Role client` ou `-Role mechanic`
   - Android émulateur : `.\run_android.ps1` → `http://10.0.2.2:8000`
   - Téléphone physique (Wi‑Fi) : `powershell -ExecutionPolicy Bypass -File scripts/flutter-android-with-lan-api.ps1` → IP LAN du PC
 - Swagger : `http://127.0.0.1:8000/api/documentation`

@@ -98,7 +98,7 @@ class _NotificationsPanelState extends State<NotificationsPanel> {
           ),
           trailing: Text(time, style: AppFonts.style(fontSize: 12, color: Colors.grey.shade600)),
           onTap: () {
-            _hub.markAllRead();
+            _hub.markReadAt(i);
             NotificationNavigation.handleDataMap(n.data);
           },
         );

@@ -27,6 +27,7 @@ import '../screens/trip_navigation_screen.dart';
 import '../screens/user_profile_page.dart';
 import '../widgets/user_avatar.dart';
 import '../services/app_notification_hub.dart';
+import '../services/in_app_notification_sync.dart';
 import '../services/live_sync.dart';
 import '../services/profile_signals.dart';
 import '../screens/history_screen.dart';
@@ -86,6 +87,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     _applyMemoryCacheInstant();
     _requestsSig = _signatureForRequests(requests);
     unawaited(_bootstrapMechanic());
+    unawaited(InAppNotificationSync.instance.start());
     _scheduleRefreshTimer();
     _schedulePresenceTimer();
     _syncPush();
@@ -348,6 +350,7 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    InAppNotificationSync.instance.stop();
     AppNotificationHub.instance.removeListener(_onNotificationsChanged);
     ProfileSignals.instance.removeListener(_onProfilesExternallyUpdated);
     LiveSync.instance.removeListener(_onLiveSync);
@@ -939,8 +942,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _openRequestPhoto(String url, {String? title}) {
-    Navigator.push<void>(
-      context,
+    if (url.trim().isEmpty) return;
+    Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => FullScreenImagePage(imageUrl: url, title: title ?? 'Photo de la panne'),
       ),
@@ -966,6 +969,8 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
 
     showDialog<void>(
       context: context,
+      useRootNavigator: true,
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         title: Text('Demande #${id ?? '—'}'),
         content: SingleChildScrollView(
