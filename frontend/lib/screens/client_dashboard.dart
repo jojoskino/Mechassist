@@ -28,7 +28,6 @@ import '../widgets/dashboard_search_bar.dart';
 import '../widgets/create_request_sheet.dart';
 import '../widgets/maps_discovery_shell.dart';
 import '../widgets/mechanic_nearby_map.dart';
-import '../widgets/public_network_image.dart';
 import '../widgets/request_list_tile.dart';
 import '../widgets/mechanic_info_card.dart';
 import '../screens/user_profile_page.dart';
@@ -45,6 +44,8 @@ import '../utils/recent_addresses.dart';
 import '../screens/help_screen.dart';
 import '../screens/full_screen_image_page.dart';
 import '../app_navigator.dart';
+import '../screens/client_request_detail_page.dart';
+import '../utils/app_dialogs.dart';
 
 class DashboardClient extends StatefulWidget {
   const DashboardClient({super.key, this.initialTabIndex = 0});
@@ -922,8 +923,7 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Future<void> _promptCancelRequest(int requestId) async {
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await AppDialogs.show<bool>(
       builder: (ctx) => AlertDialog(
         title: const Text('Annuler la demande ?'),
         content: const Text(
@@ -946,25 +946,23 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (!mounted) return;
     final code = res['status'] as int?;
     final success = code != null && code >= 200 && code < 300;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(success ? 'Demande annulée.' : (res['message']?.toString() ?? 'Erreur')),
-        backgroundColor: success ? null : Colors.red.shade800,
-      ),
+    AppDialogs.snack(
+      success ? 'Demande annulée.' : (res['message']?.toString() ?? 'Erreur'),
+      isError: !success,
     );
     if (success) await _refreshAll(silent: true, requireFreshGps: false);
   }
 
   Future<void> _promptCloseIntervention(int requestId) async {
-    final outcome = await showDialog<String>(
-      context: context,
+    final outcome = await AppDialogs.show<String>(
       builder: (ctx) => AlertDialog(
         title: const Text('Clôturer l’intervention'),
         content: const Text('La panne a-t-elle été réglée ?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, 'not_fixed'), child: const Text('Non réglée')),
-          ElevatedButton(
+          FilledButton(
             onPressed: () => Navigator.pop(ctx, 'fixed'),
+            style: FilledButton.styleFrom(backgroundColor: FeuTheme.deepBlue),
             child: const Text('Oui, réglée'),
           ),
         ],
@@ -976,18 +974,17 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     final res = await ApiService.recordRequestOutcome(token, requestId, outcome);
     if (!mounted) return;
     final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok ? 'Intervention clôturée.' : (res['message']?.toString() ?? 'Erreur')),
-        backgroundColor: ok ? null : Colors.red.shade800,
-      ),
+    AppDialogs.snack(
+      ok ? 'Intervention clôturée.' : (res['message']?.toString() ?? 'Erreur'),
+      isError: !ok,
     );
     if (ok) await _refreshAll(silent: true, requireFreshGps: false);
   }
 
   Future<void> _promptRateMechanic(int requestId, {String mechanicName = 'Mécanicien'}) async {
+    final dialogCtx = appNavigatorKey.currentContext ?? context;
     final result = await RateMechanicSheet.show(
-      context,
+      dialogCtx,
       mechanicName: mechanicName,
       subtitle: 'Expert diagnostic & réparation',
     );
@@ -1009,11 +1006,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (!mounted) return;
     final code = res['status'] as int?;
     final ok = code != null && code >= 200 && code < 300;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok ? 'Merci pour ta note !' : (res['message']?.toString() ?? 'Erreur')),
-        backgroundColor: ok ? null : Colors.red.shade800,
-      ),
+    AppDialogs.snack(
+      ok ? 'Merci pour ta note !' : (res['message']?.toString() ?? 'Erreur'),
+      isError: !ok,
     );
     if (ok) await _refreshAll(silent: true, requireFreshGps: false);
   }
@@ -1604,135 +1599,52 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   void _showRequestDetail(Map<String, dynamic> r) {
-    final navContext = appNavigatorKey.currentContext;
-    if (navContext == null) return;
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
 
     final id = ApiService.parseIntId(r['id']);
     final rt = r['rating'];
-    final photoUrl = r['photo_url']?.toString().trim();
-    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+    final status = r['status']?.toString() ?? '';
     final mechanic = _mechanicFromRequest(r);
+    int? stars;
+    String? ratingComment;
+    if (rt is Map && rt['stars'] != null) {
+      stars = rt['stars'] is int ? rt['stars'] as int : int.tryParse(rt['stars'].toString());
+      ratingComment = rt['comment']?.toString();
+    }
 
-    showDialog<void>(
-      context: navContext,
-      useRootNavigator: true,
-      barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
-        scrollable: true,
-        title: Text('Demande #${id ?? '—'}'),
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (mechanic != null) ...[
-              MechanicInfoCard(
-                name: _mechanicNameFromRequest(r),
-                phone: mechanic['phone']?.toString(),
-                specialty: mechanic['mechanic_specialty']?.toString(),
-                avatarUrl: mechanic['avatar_url']?.toString(),
-                avatarCacheEpoch: _peerAvatarCacheEpoch,
-                mechanicUser: mechanic,
-                isOnline: userIsOnline(mechanic),
-                compact: true,
-                onCall: () => launchTelDialer(navContext, mechanic['phone']?.toString()),
-                onChat: id != null && r['status']?.toString() == 'accepted'
-                    ? () {
-                        Navigator.pop(ctx);
-                        _openChat(id);
-                      }
-                    : null,
-              ),
-              const SizedBox(height: 8),
-            ] else
-              Text('Mécanicien : ${_mechanicNameFromRequest(r)}'),
-            const SizedBox(height: 8),
-            Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
-            const SizedBox(height: 8),
-            Text(_requestStatusLine(r)),
-            if (r['status']?.toString() == 'completed' && r['outcome'] != null) ...[
-              const SizedBox(height: 8),
-              Text('Résultat : ${_outcomeLabelFr(r['outcome'])}'),
-            ],
-            if (rt is Map && rt['stars'] != null) ...[
-              const SizedBox(height: 8),
-              Text('Ta note : ${rt['stars']}/5 ★'),
-              if (rt['comment'] != null && rt['comment'].toString().trim().isNotEmpty)
-                Text('« ${rt['comment']} »', style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
-            ],
-            const SizedBox(height: 8),
-            Text(r['description']?.toString() ?? ''),
-            if (r['client_address'] != null && r['client_address'].toString().trim().isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text('Repère : ${r['client_address']}', style: TextStyle(color: Colors.grey.shade800, fontSize: 13)),
-            ],
-            if (r['status']?.toString() == 'accepted' && !_mechanicMarkedComplete(r)) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Le mécanicien doit marquer l’intervention comme terminée avant que tu puisses clôturer.',
-                style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
-              ),
-            ],
-            if (hasPhoto) ...[
-              const SizedBox(height: 12),
-              LayoutBuilder(
-                builder: (_, constraints) {
-                  final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
-                      ? constraints.maxWidth
-                      : 280.0;
-                  return GestureDetector(
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _openRequestPhoto(photoUrl);
-                    },
-                    child: PublicNetworkImage(
-                      url: photoUrl,
-                      width: w,
-                      height: 160,
-                      borderRadius: BorderRadius.circular(8),
-                      icon: Icons.broken_image_outlined,
-                    ),
-                  );
-                },
-              ),
-            ],
-          ],
+    nav.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ClientRequestDetailPage(
+          requestIdLabel: '#${id ?? '—'}',
+          statusLine: _requestStatusLine(r),
+          mechanicName: _mechanicNameFromRequest(r),
+          mechanic: mechanic,
+          avatarCacheEpoch: _peerAvatarCacheEpoch,
+          mechanicMarkedComplete: _mechanicMarkedComplete(r),
+          needsRating: _requestNeedsRating(r),
+          outcomeLabel: r['outcome'] != null ? _outcomeLabelFr(r['outcome']) : null,
+          ratingStars: stars,
+          ratingComment: ratingComment,
+          vehicleType: r['vehicle_type']?.toString() ?? '—',
+          description: r['description']?.toString() ?? '',
+          clientAddress: r['client_address']?.toString(),
+          photoUrl: r['photo_url']?.toString(),
+          status: status,
+          onOpenPhoto: _openRequestPhoto,
+          onChat: id != null && status == 'accepted' ? () => _openChat(id) : null,
+          onCancel: id != null && status == 'pending'
+              ? () => AppDialogs.runNextFrame(() => _promptCancelRequest(id))
+              : null,
+          onCloseIntervention: id != null && status == 'accepted' && _mechanicMarkedComplete(r)
+              ? () => AppDialogs.runNextFrame(() => _promptCloseIntervention(id))
+              : null,
+          onRate: id != null && _requestNeedsRating(r)
+              ? () => AppDialogs.runNextFrame(
+                    () => _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(r)),
+                  )
+              : null,
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
-          if (r['status']?.toString() == 'pending' && id != null)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _promptCancelRequest(id);
-              },
-              child: Text('Annuler la demande', style: TextStyle(color: Colors.red.shade800)),
-            ),
-          if (r['status']?.toString() == 'accepted' && id != null) ...[
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _openChat(id);
-              },
-              child: const Text('Chat'),
-            ),
-            if (_mechanicMarkedComplete(r))
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _promptCloseIntervention(id);
-                },
-                child: const Text('Clôturer'),
-              ),
-          ],
-          if (id != null && _requestNeedsRating(r))
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(r));
-              },
-              child: const Text('Noter'),
-            ),
-        ],
       ),
     );
   }

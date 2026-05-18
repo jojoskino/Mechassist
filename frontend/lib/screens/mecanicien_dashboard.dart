@@ -35,6 +35,7 @@ import '../screens/history_screen.dart';
 import '../screens/notifications_panel.dart';
 import '../widgets/mechassist_bottom_nav.dart';
 import '../app_navigator.dart';
+import '../screens/mechanic_request_detail_page.dart';
 import '../widgets/mechassist_light_app_bar.dart';
 import '../widgets/mechanic_stats_header.dart';
 import '../screens/help_screen.dart';
@@ -984,16 +985,15 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
   }
 
   void _showMechanicRequestDetail(Map<String, dynamic> r) {
-    final navContext = appNavigatorKey.currentContext;
-    if (navContext == null) return;
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
 
     final status = (r['status'] ?? '').toString().trim();
     final id = ApiService.parseIntId(r['id']);
     final rawPhoto = r['photo_url']?.toString().trim();
-    final hasPhoto = rawPhoto != null && rawPhoto.isNotEmpty;
-    final client = r['client'];
+    final client = r['client'] is Map ? Map<String, dynamic>.from(r['client'] as Map) : null;
     String? clientPhone;
-    if (client is Map) {
+    if (client != null) {
       clientPhone = client['phone']?.toString();
     }
     final canDial = normalizePhoneForDial(clientPhone) != null;
@@ -1003,127 +1003,32 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
             r['mechanic_completed_at'].toString().trim().isEmpty ||
             r['mechanic_completed_at'].toString() == 'null');
 
-    showDialog<void>(
-      context: navContext,
-      useRootNavigator: true,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return AlertDialog(
-          scrollable: true,
-          title: Text('Demande #${id ?? '—'}'),
-          content: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (client is Map) ...[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    UserAvatar(
-                      name: client['name']?.toString() ?? 'C',
-                      avatarUrl: client['avatar_url']?.toString(),
-                      cacheEpoch: _clientAvatarCacheEpoch,
-                      radius: 24,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            client['name']?.toString() ?? 'Client',
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                          ),
-                          if (client['phone'] != null && client['phone'].toString().trim().isNotEmpty)
-                            Text(
-                              client['phone'].toString(),
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-              Text('Véhicule : ${r['vehicle_type'] ?? '—'}'),
-              const SizedBox(height: 6),
-              Text('Statut : $status'),
-              const SizedBox(height: 8),
-              Text(r['description']?.toString() ?? ''),
-              if (hasPhoto) ...[
-                const SizedBox(height: 12),
-                Text('Photo de la panne', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
-                const SizedBox(height: 8),
-                LayoutBuilder(
-                  builder: (layoutCtx, constraints) {
-                    final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
-                        ? constraints.maxWidth
-                        : 280.0;
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _openRequestPhoto(rawPhoto);
-                      },
-                      child: PublicNetworkImage(
-                        url: rawPhoto,
-                        width: w,
-                        height: 200,
-                        borderRadius: BorderRadius.circular(12),
-                        icon: Icons.broken_image_outlined,
-                      ),
-                    );
-                  },
-                ),
-                TextButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _openRequestPhoto(rawPhoto);
-                  },
-                  icon: const Icon(Icons.zoom_in_rounded),
-                  label: const Text('Agrandir la photo'),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
-            if (canDial && (status == 'pending' || status == 'accepted'))
-              TextButton.icon(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  launchTelDialer(navContext, clientPhone);
-                },
-                icon: const Icon(Icons.call_rounded),
-                label: const Text('Appeler'),
-              ),
-            if (canAct && id != null)
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _processRequest(id, true, r);
-                },
-                child: const Text('Accepter'),
-              ),
-            if (status == 'accepted' && id != null)
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _openChat(id);
-                },
-                child: const Text('Chat'),
-              ),
-            if (canMarkDone && id != null)
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _markMechanicComplete(id);
-                },
-                child: const Text('Terminée'),
-              ),
-          ],
-        );
-      },
+    nav.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => MechanicRequestDetailPage(
+          requestIdLabel: '#${id ?? '—'}',
+          status: status,
+          vehicleType: r['vehicle_type']?.toString() ?? '—',
+          description: r['description']?.toString() ?? '',
+          client: client,
+          avatarCacheEpoch: _clientAvatarCacheEpoch,
+          photoUrl: rawPhoto,
+          canDial: canDial,
+          canAccept: canAct && id != null,
+          canMarkDone: canMarkDone && id != null,
+          onOpenPhoto: _openRequestPhoto,
+          onCall: canDial
+              ? () {
+                  final ctx = appNavigatorKey.currentContext;
+                  if (ctx != null) launchTelDialer(ctx, clientPhone);
+                }
+              : null,
+          onAccept: id != null ? () => _processRequest(id, true, r) : null,
+          onDecline: id != null ? () => _processRequest(id, false, r) : null,
+          onChat: id != null && status == 'accepted' ? () => _openChat(id) : null,
+          onMarkDone: id != null ? () => _markMechanicComplete(id) : null,
+        ),
+      ),
     );
   }
 
