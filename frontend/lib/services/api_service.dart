@@ -890,8 +890,9 @@ class ApiService {
         body: jsonEncode({'outcome': outcome}),
       ));
       final body = _parseBody(response);
-      final st = body['status'] as int?;
-      if (st != null && st >= 200 && st < 300) {
+      body['http_status'] = response.statusCode;
+      final st = response.statusCode;
+      if (st >= 200 && st < 300) {
         _afterRequestMutation();
       }
       return body;

@@ -187,7 +187,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     final buf = StringBuffer();
     for (final raw in list) {
       final r = raw is Map ? raw : const <String, dynamic>{};
-      buf.write('${r['id']}:${r['status']};');
+      buf.write(
+        '${r['id']}:${r['status']}:${r['mechanic_completed_at']}:${r['outcome']};',
+      );
     }
     return buf.toString();
   }
@@ -862,8 +864,12 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   bool _mechanicMarkedComplete(Map<String, dynamic> r) {
     final v = r['mechanic_completed_at'];
     if (v == null) return false;
-    final s = v.toString();
+    final s = v.toString().trim();
     return s.isNotEmpty && s != 'null';
+  }
+
+  bool _canClientCloseRequest(Map<String, dynamic> r) {
+    return r['status']?.toString() == 'accepted' && _mechanicMarkedComplete(r);
   }
 
   String _outcomeLabelFr(dynamic outcome) {
@@ -954,6 +960,9 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   }
 
   Future<void> _promptCloseIntervention(int requestId) async {
+    await _refreshRequestsOnly(forceNetwork: true);
+    if (!mounted) return;
+
     final outcome = await AppDialogs.show<String>(
       builder: (ctx) => AlertDialog(
         title: const Text('Clôturer l’intervention'),
@@ -973,7 +982,8 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     if (token == null || !mounted) return;
     final res = await ApiService.recordRequestOutcome(token, requestId, outcome);
     if (!mounted) return;
-    final ok = (res['status'] as int?) != null && (res['status'] as int) >= 200 && (res['status'] as int) < 300;
+    final httpStatus = res['http_status'] as int? ?? res['status'] as int?;
+    final ok = httpStatus != null && httpStatus >= 200 && httpStatus < 300;
     AppDialogs.snack(
       ok ? 'Intervention clôturée.' : (res['message']?.toString() ?? 'Erreur'),
       isError: !ok,
@@ -1157,7 +1167,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
         bottomNavigationBar: MechAssistBottomNav(
           currentIndex: _tabIndex,
           badges: {2: _pendingRequestsCount},
-          onTap: (i) => setState(() => _tabIndex = i),
+          onTap: (i) {
+            setState(() => _tabIndex = i);
+            if (i == 2) unawaited(_refreshRequestsOnly(forceNetwork: true));
+          },
         ),
       ),
     );
@@ -1598,14 +1611,38 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
     );
   }
 
-  void _showRequestDetail(Map<String, dynamic> r) {
+  Future<void> _showRequestDetail(Map<String, dynamic> r) async {
     final nav = appNavigatorKey.currentState;
     if (nav == null) return;
 
+    var fresh = Map<String, dynamic>.from(r);
     final id = ApiService.parseIntId(r['id']);
-    final rt = r['rating'];
-    final status = r['status']?.toString() ?? '';
-    final mechanic = _mechanicFromRequest(r);
+    if (id != null) {
+      final token = await AuthStorage.getToken();
+      if (token != null) {
+        final res = await ApiService.getInterventionRequest(token, id, force: true);
+        final httpStatus = res['http_status'] as int?;
+        if (httpStatus != null && httpStatus >= 200 && httpStatus < 300) {
+          fresh = Map<String, dynamic>.from(res);
+          final idx = requests.indexWhere((raw) => ApiService.parseIntId(
+                (raw is Map ? raw['id'] : null),
+              ) ==
+              id);
+          if (idx >= 0) {
+            requests[idx] = fresh;
+            _requestsSig = _signatureForRequests(requests);
+            unawaited(ApiDataCache.saveRequests(requests, mechanic: false));
+            if (mounted) setState(() {});
+          }
+        }
+      }
+    }
+
+    if (!mounted) return;
+
+    final rt = fresh['rating'];
+    final status = fresh['status']?.toString() ?? '';
+    final mechanic = _mechanicFromRequest(fresh);
     int? stars;
     String? ratingComment;
     if (rt is Map && rt['stars'] != null) {
@@ -1617,31 +1654,31 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
       MaterialPageRoute<void>(
         builder: (_) => ClientRequestDetailPage(
           requestIdLabel: '#${id ?? '—'}',
-          statusLine: _requestStatusLine(r),
-          mechanicName: _mechanicNameFromRequest(r),
+          statusLine: _requestStatusLine(fresh),
+          mechanicName: _mechanicNameFromRequest(fresh),
           mechanic: mechanic,
           avatarCacheEpoch: _peerAvatarCacheEpoch,
-          mechanicMarkedComplete: _mechanicMarkedComplete(r),
-          needsRating: _requestNeedsRating(r),
-          outcomeLabel: r['outcome'] != null ? _outcomeLabelFr(r['outcome']) : null,
+          mechanicMarkedComplete: _mechanicMarkedComplete(fresh),
+          needsRating: _requestNeedsRating(fresh),
+          outcomeLabel: fresh['outcome'] != null ? _outcomeLabelFr(fresh['outcome']) : null,
           ratingStars: stars,
           ratingComment: ratingComment,
-          vehicleType: r['vehicle_type']?.toString() ?? '—',
-          description: r['description']?.toString() ?? '',
-          clientAddress: r['client_address']?.toString(),
-          photoUrl: r['photo_url']?.toString(),
+          vehicleType: fresh['vehicle_type']?.toString() ?? '—',
+          description: fresh['description']?.toString() ?? '',
+          clientAddress: fresh['client_address']?.toString(),
+          photoUrl: fresh['photo_url']?.toString(),
           status: status,
           onOpenPhoto: _openRequestPhoto,
           onChat: id != null && status == 'accepted' ? () => _openChat(id) : null,
           onCancel: id != null && status == 'pending'
               ? () => AppDialogs.runNextFrame(() => _promptCancelRequest(id))
               : null,
-          onCloseIntervention: id != null && status == 'accepted' && _mechanicMarkedComplete(r)
+          onCloseIntervention: id != null && _canClientCloseRequest(fresh)
               ? () => AppDialogs.runNextFrame(() => _promptCloseIntervention(id))
               : null,
-          onRate: id != null && _requestNeedsRating(r)
+          onRate: id != null && _requestNeedsRating(fresh)
               ? () => AppDialogs.runNextFrame(
-                    () => _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(r)),
+                    () => _promptRateMechanic(id, mechanicName: _mechanicNameFromRequest(fresh)),
                   )
               : null,
         ),
@@ -1652,9 +1689,10 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
   /// Évite un `Wrap` vide (erreur de layout) quand aucune action rapide.
   Widget? _buildRequestListTrailing(Map<String, dynamic> r, int? id) {
     final showChat = r['status']?.toString() == 'accepted' && id != null;
+    final showClose = _canClientCloseRequest(r) && id != null;
     final showRate = _requestNeedsRating(r) && id != null;
     final showCancel = r['status']?.toString() == 'pending' && id != null;
-    if (!showChat && !showRate && !showCancel) {
+    if (!showChat && !showClose && !showRate && !showCancel) {
       return const Icon(Icons.chevron_right);
     }
     return Wrap(
@@ -1665,6 +1703,12 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
           TextButton(
             onPressed: () => _promptCancelRequest(id),
             child: Text('Annuler', style: TextStyle(color: Colors.red.shade800, fontSize: 13)),
+          ),
+        if (showClose)
+          TextButton(
+            onPressed: () => _promptCloseIntervention(id),
+            style: TextButton.styleFrom(foregroundColor: FeuTheme.deepBlue),
+            child: const Text('Clôturer'),
           ),
         if (showChat)
           TextButton(
@@ -1714,21 +1758,55 @@ class _DashboardClientState extends State<DashboardClient> with WidgetsBindingOb
                 );
               }
               if (index == 1) {
-                if (mechanic == null || activeId == null) {
+                final activeRequest = active;
+                if (mechanic == null || activeId == null || activeRequest == null) {
                   return const SizedBox.shrink();
                 }
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: MechanicInfoCard(
-                    name: mechanic['name']?.toString() ?? 'Mécanicien',
-                    phone: mechanic['phone']?.toString(),
-                    specialty: mechanic['mechanic_specialty']?.toString(),
-                    avatarUrl: mechanic['avatar_url']?.toString(),
-                    avatarCacheEpoch: _peerAvatarCacheEpoch,
-                    mechanicUser: mechanic,
-                    isOnline: userIsOnline(mechanic),
-                    onCall: () => launchTelDialer(context, mechanic['phone']?.toString()),
-                    onChat: () => _openChat(activeId),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      MechanicInfoCard(
+                        name: mechanic['name']?.toString() ?? 'Mécanicien',
+                        phone: mechanic['phone']?.toString(),
+                        specialty: mechanic['mechanic_specialty']?.toString(),
+                        avatarUrl: mechanic['avatar_url']?.toString(),
+                        avatarCacheEpoch: _peerAvatarCacheEpoch,
+                        mechanicUser: mechanic,
+                        isOnline: userIsOnline(mechanic),
+                        onCall: () => launchTelDialer(context, mechanic['phone']?.toString()),
+                        onChat: () => _openChat(activeId),
+                      ),
+                      if (_canClientCloseRequest(activeRequest)) ...[
+                        const SizedBox(height: 10),
+                        Material(
+                          color: FeuTheme.deepBlue.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                            child: Row(
+                              children: [
+                                Icon(Icons.task_alt_rounded, color: FeuTheme.deepBlue.withValues(alpha: 0.9)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Le mécanicien a terminé. Clôture l’intervention (panne réglée ou non).',
+                                    style: TextStyle(fontSize: 13, color: Colors.grey.shade800, height: 1.35),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton(
+                                  onPressed: () => _promptCloseIntervention(activeId),
+                                  style: FilledButton.styleFrom(backgroundColor: FeuTheme.deepBlue),
+                                  child: const Text('Clôturer'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 );
               }

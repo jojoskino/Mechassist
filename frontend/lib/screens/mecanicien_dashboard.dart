@@ -153,7 +153,9 @@ class _DashboardMecanicienState extends State<DashboardMecanicien> with WidgetsB
     final buf = StringBuffer();
     for (final raw in list) {
       final r = raw is Map ? raw : const <String, dynamic>{};
-      buf.write('${r['id']}:${r['status']};');
+      buf.write(
+        '${r['id']}:${r['status']}:${r['mechanic_completed_at']}:${r['outcome']};',
+      );
     }
     return buf.toString();
   }
